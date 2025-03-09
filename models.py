@@ -70,7 +70,7 @@ class CartItems(Model):
     quantity = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
 
     class Meta:
-        table = "cartItems"
+        table = "cartitems"
 
 class Transaction(Model):
     id = fields.IntField(pk=True)
@@ -96,7 +96,7 @@ class TransactionItem(Model):
     amount = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
 
     class Meta:
-        table = "transactionItems"
+        table = "transactionitems"
 
 class Customer(Model):
     id = fields.IntField(pk=True)
@@ -131,7 +131,7 @@ class StockInput(Model):
     branchItemId = fields.IntField(null=False)
 
     class Meta:
-        table = "stockInputs"
+        table = "stockinputs"
 
 class WareHouseItem(Model):
     id = fields.IntField(null=False, pk=True)
@@ -139,7 +139,7 @@ class WareHouseItem(Model):
     quantity = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
 
     class Meta:
-        table = "WareHouseItems"
+        table = "warehouseitems"
 
 class WHStockInput(Model):
     id = fields.IntField(null=False, pk=True)
@@ -151,4 +151,4 @@ class WHStockInput(Model):
     actualQty = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
     itemId = fields.IntField(null=False)
     class Meta:
-        table = "whStockInputs"
+        table = "whstockinputs"
