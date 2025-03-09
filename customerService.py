@@ -1,6 +1,5 @@
 from models import Customer, Branch, Transaction, Cart
-from utils import create_response, sanitize_filename
-from config import CUSTOMER_IMAGES, BASE_URL
+from utils import create_response, upload_media, delete_media
 import os
 from tortoise.queryset import Q 
 
@@ -20,7 +19,6 @@ async def getCustomerList(branchId = None, search = ""):
 
 async def getCustomer(id):
     if id:
-        base_url = BASE_URL
         customer = await Customer.get_or_none(id=id)
         
         if customer:
@@ -48,7 +46,6 @@ async def getCustomer(id):
                 'branchId': customer.branchId,
                 'branch': branch.name if branch else None,
                 'fileName': customer.fileName,
-                "fileUrl": f"{base_url}/getCustomerImage?fileName={customer.fileName}" if customer.fileName else None,
             }
 
             request = {
@@ -98,20 +95,10 @@ async def saveCustomer(data, file):
         message = "Customer updated successfully."
 
     if(file != None):
-            user_images_dir = CUSTOMER_IMAGES
-            if not os.path.exists(user_images_dir):
-                os.makedirs(user_images_dir)
-            
-            file_extension = os.path.splitext(file.filename)[1]
-            sanitized_name = sanitize_filename(name)
-            new_file_name = f"{sanitized_name}_{customerId}{file_extension}"
-            file_path = os.path.join(user_images_dir, new_file_name)
-            
-            with open(file_path, 'wb') as f:
-                f.write(file.read())
-
+            result = upload_media(file)
             existing_customer = await Customer.get_or_none(id=customerId)
-            existing_customer.fileName = new_file_name
+            existing_customer.fileName = result["secure_url"]
+            existing_customer.imageId = result["public_id"]
             await existing_customer.save()
 
     return create_response(True, message, customerId, None), 200
@@ -123,10 +110,10 @@ async def deleteCustomer(id):
         return create_response(False, "Customer not found.", None, None), 200
 
     if customer.fileName:
-        image_path = os.path.join(CUSTOMER_IMAGES, customer.fileName)
-        if os.path.exists(image_path):
-            os.remove(image_path)
-            
+        response = delete_media(customer.imageId)
+        if(response == False):
+            return create_response(False, "An error occured.", None, None), 200
+        
     carts = await Cart.filter(customerId=id)
 
     transactions = await Transaction.filter(customerId=id)

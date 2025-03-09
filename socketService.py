@@ -52,7 +52,7 @@ async def dailyTransaction(websocket, branchId):
             transactionQuery = f"""
                 SELECT tr.totalAmount
                 FROM transactions tr
-                INNER JOIN users u ON u.id = tr.cashierId
+                INNER JOIN bpimsdb.users u ON u.id = tr.cashierId
                 WHERE DATE(tr.transactionDate) = CURDATE()
                 AND TIME(tr.transactionDate) BETWEEN '{period["start"]}' AND '{period["end"]}'
                 AND tr.branchId = {branchId}
@@ -71,8 +71,8 @@ async def dailyTransaction(websocket, branchId):
 
         dailyTransactsDto = f"""
             SELECT tr.id, tr.totalAmount, tr.slipNo, tr.transactionDate, u.name as cashierName
-            FROM transactions tr
-            INNER JOIN users u ON u.id = tr.cashierId
+            FROM bpimsdb.transactions tr
+            INNER JOIN bpimsdb.users u ON u.id = tr.cashierId
             WHERE DATE(tr.transactionDate) = CURDATE()
             AND tr.branchId = {branchId}
             ORDER BY tr.transactionDate;
@@ -123,7 +123,7 @@ async def totalSales(websocket, branchId):
 
         totalSalesMonthQuery = f"""
             SELECT SUM(totalAmount) AS totalSales
-            FROM transactions
+            FROM bpimsdb.transactions
             WHERE YEAR(transactionDate) = YEAR(CURDATE()) AND MONTH(transactionDate) = MONTH(CURDATE())
             AND branchId = {branchId}
         """
@@ -225,7 +225,7 @@ async def totalSalesHQ(websocket):
 
         totalSalesMonthQuery = f"""
             SELECT SUM(totalAmount) AS totalSales
-            FROM transactions
+            FROM bpimsdb.transactions
             WHERE YEAR(transactionDate) = YEAR(CURDATE()) AND MONTH(transactionDate) = MONTH(CURDATE())
         """
         totalSalesPerMonth = await connection.execute_query_dict(totalSalesMonthQuery)

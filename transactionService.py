@@ -252,17 +252,28 @@ async def processPayment(cartId, amountReceived):
     cartItems = await CartItems.filter(cartId=cartId)
     transactionItems = []
 
+    # Calculate total amount (revenue)
     total_amount = cart.subTotal
     if cart.discount:
-        total_amount -= cart.discount  
+        total_amount -= cart.discount  # Discount reduces revenue
     if cart.deliveryFee:
-        total_amount += cart.deliveryFee
+        total_amount += cart.deliveryFee  # Delivery fee increases revenue
 
     if total_amount > float(amountReceived):
         return create_response(False, 'Transaction Error. Please Try Again!'), 404
 
     slip_no = await generate_slip_no(cart.userId)
     total_profit = 0 
+
+    # Calculate total cost of goods sold (COGS)
+    total_cogs = 0
+    for cItem in cartItems:
+        item = await Item.get_or_none(id=cItem.itemId)
+        if item:
+            total_cogs += item.cost * cItem.quantity  # Sum up COGS
+
+    # Calculate profit: Revenue - COGS - Discounts + Delivery Fees
+    total_profit = total_amount - total_cogs
 
     transaction = await Transaction.create(
         amountReceived=float(amountReceived),
@@ -272,19 +283,17 @@ async def processPayment(cartId, amountReceived):
         transactionDate=datetime.now(),
         customerId=cart.customerId,
         branchId=user.branchId,
-        profit=0,
-        discount = cart.discount,
-        deliveryFee = cart.deliveryFee
+        profit=total_profit,  # Updated profit calculation
+        discount=cart.discount,
+        deliveryFee=cart.deliveryFee
     )
 
     for cItem in cartItems:
         item = await Item.get_or_none(id=cItem.itemId)
         if item:    
-            branchItem = await BranchItem.get_or_none(branchId = user.branchId, itemId = item.id)
+            branchItem = await BranchItem.get_or_none(branchId=user.branchId, itemId=item.id)
             branchItem.quantity -= cItem.quantity
             itemAmount = item.price * cItem.quantity
-            itemProfit = (item.price - item.cost) * cItem.quantity  
-            total_profit += itemProfit 
 
             tItem = await TransactionItem.create(
                 transactionId=transaction.id,
@@ -302,8 +311,6 @@ async def processPayment(cartId, amountReceived):
                 "sellByUnit": item.sellByUnit
             })
 
-    transaction.profit = total_profit
-    await transaction.save()
     await branchItem.save()
     
     transactionRequest = {
@@ -335,7 +342,6 @@ async def processPayment(cartId, amountReceived):
 
     message = 'Payment Successful'
     return create_response(True, message, transactionRequest), 200
-
 
 async def generate_slip_no(cashierId: int) -> str:
     dateToday = datetime.now().strftime('%m%d%y')

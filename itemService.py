@@ -1,8 +1,7 @@
 from models import BranchItem, StockInput, Item, Branch, WareHouseItem
-from utils import create_response, sanitize_filename
+from utils import create_response, sanitize_filename, upload_media, delete_media
 from tortoise import Tortoise
 from decimal import Decimal
-from config import ITEM_IMAGES, BASE_URL
 import os
 
 """ GET METHODS """
@@ -81,8 +80,6 @@ async def get_products(categoryId, branchId, page=1, search=""):
 
     items = result[1]
 
-    base_url = BASE_URL
-
     itemList = [
         {
             "id": item['id'],
@@ -93,7 +90,6 @@ async def get_products(categoryId, branchId, page=1, search=""):
             "isManaged": item['isManaged'],
             "imagePath": item['imagePath'],
             "quantity": item['quantity'],
-            "imageUrl": f"{base_url}/getItemImage?fileName={item['imagePath']}" if item['imagePath'] else None,
             "sellByUnit": bool(item['sellByUnit'])
         }
         for item in items
@@ -107,8 +103,9 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
     offset = (page - 1) * pageSize
 
     sqlQuery = """
-        SELECT bi.id, i.name, bi.quantity, i.unitOfMeasure, i.criticalValue, i.sellByUnit, i.moq, i.imagePath FROM items i 
+        SELECT bi.id, i.name, bi.quantity, i.unitOfMeasure, i.criticalValue, i.sellByUnit, i.moq, wi.quantity as whQuantity, i.imagePath FROM items i 
         INNER JOIN branchitem bi ON bi.itemId = i.id
+        INNER JOIN warehouseitems wi ON wi.itemId = i.id
         WHERE bi.branchId = %s AND i.isManaged = 1
     """
     params = [branchId]
@@ -130,14 +127,14 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
     countQuery = """
         SELECT COUNT(*) 
         FROM items i
-        LEFT JOIN branchitem bi ON i.id = bi.itemId
+        INNER JOIN branchitem bi ON bi.itemId = i.id
+        INNER JOIN warehouseitems wi ON wi.itemId = i.id
         WHERE bi.branchId = %s AND i.isManaged = 1
     """
     totalCountResult = await connection.execute_query(countQuery, (branchId,))
     totalCount = totalCountResult[1][0]['COUNT(*)']
 
     items = result[1]
-    base_url = BASE_URL
 
     itemList = [
         {
@@ -149,7 +146,7 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
             "sellByUnit": bool(item['sellByUnit']),
             "moq": item['moq'],
             "imagePath": item['imagePath'],
-            "imageUrl": f"{base_url}/getItemImage?fileName={item['imagePath']}" if item['imagePath'] else None,
+            "whQty": item['whQuantity']
         }
         for item in items
     ]
@@ -239,7 +236,6 @@ async def getProductsHQ(categoryId, page=1, search=""):
     totalCount = totalCountResult[1][0]['COUNT(*)']
 
     items = result[1]
-    base_url = BASE_URL
 
     itemList = [
         {
@@ -250,12 +246,11 @@ async def getProductsHQ(categoryId, page=1, search=""):
             "cost": item['cost'],
             "isManaged": item['isManaged'],
             "imagePath": item['imagePath'],
-            "sellbyUnit": bool(item['sellByUnit']),
+            "sellByUnit": bool(item['sellByUnit']),
             "moq": item['moq'],
             "categoryName":item['categoryName'],
             "criticalValue":item['criticalValue'],
-            "unitOfMeasure":item['unitOfMeasure'],
-            "imageUrl": f"{base_url}/getItemImage?fileName={item['imagePath']}" if item['imagePath'] else None
+            "unitOfMeasure":item['unitOfMeasure']
         }
         for item in items
     ]
@@ -294,7 +289,6 @@ async def getProductHQ(itemId):
         return create_response(False, "Item not found", None), 404
 
     item = items[0]
-    base_url = BASE_URL
 
     formatted_item = {
         "id": item['id'],
@@ -304,12 +298,11 @@ async def getProductHQ(itemId):
         "cost": item['cost'],
         "isManaged": item['isManaged'],
         "imagePath": item['imagePath'],
-        "sellbyUnit": bool(item['sellByUnit']),
+        "sellByUnit": bool(item['sellByUnit']),
         "moq": item['moq'],
         "categoryName": item['categoryName'],
         "criticalValue": item['criticalValue'],
-        "unitOfMeasure": item['unitOfMeasure'],
-        "imageUrl": f"{base_url}/getItemImage?fileName={item['imagePath']}" if item['imagePath'] else None,
+        "unitOfMeasure": item['unitOfMeasure']
     }
 
     return create_response(True, "Item Successfully Retrieved", formatted_item), 200
@@ -343,7 +336,12 @@ async def saveItem(data, file):
     cost = Decimal(data.get('cost'))
     categoryId = data.get('categoryId')
     moq = data.get('moq')
-    sellByUnit = bool(data.get('sellByUnit'))
+    sellByUnit = data.get('sellByUnit')
+    if sellByUnit == 'true':
+        sellByUnit = True
+    else:
+        sellByUnit = False
+
     criticalValue = data.get('criticalValue')
     unitOfMeasure = data.get('unitOfMeasure')
 
@@ -394,20 +392,10 @@ async def saveItem(data, file):
         await existing_item.save()
 
     if(file != None):
-            user_images_dir = ITEM_IMAGES
-            if not os.path.exists(user_images_dir):
-                os.makedirs(user_images_dir)
-            
-            file_extension = os.path.splitext(file.filename)[1]
-            sanitized_name = sanitize_filename(name)
-            new_file_name = f"{sanitized_name}_{itemId}{file_extension}"
-            file_path = os.path.join(user_images_dir, new_file_name)
-            
-            with open(file_path, 'wb') as f:
-                f.write(file.read())
-
+            result = upload_media(file)
             existing_item = await Item.get_or_none(id=itemId)
-            existing_item.imagePath = new_file_name
+            existing_item.imagePath = result["secure_url"]
+            existing_item.imageId = result["public_id"]
             await existing_item.save()
 
     return create_response(True, "Success", itemId, None), 200
@@ -419,9 +407,13 @@ async def deleteItem(id):
         return create_response(False, "Item not found.", None, None), 200
 
     item.isManaged = False
-
-    await item.save()
-
+    if item.imagePath:
+        result = delete_media(item.imageId)
+        if(result == False):
+            return create_response(False, "An error occured.", None, None), 200
+        
+    item.save()
+    
     return create_response(True, "Item deleted successfully.", None, None), 200
 
 async def getStocksMonitor(categoryId, page=1, search=""):
@@ -440,7 +432,6 @@ async def getStocksMonitor(categoryId, page=1, search=""):
                 WHERE i.isManaged = 1
     """
     params = []
-    base_url = BASE_URL
 
     if int(categoryId) == 1:
         sqlQuery += " AND (b1.quantity < i.criticalValue OR b2.quantity < i.criticalValue OR b3.quantity < i.criticalValue OR wh.quantity < i.criticalValue)"
@@ -489,8 +480,7 @@ async def getStocksMonitor(categoryId, page=1, search=""):
             "ppId": item['ppId'],
             "snId": item['snId'],
             "lId": item['lId'],
-            "whId": item['whId'],
-            "imageUrl": f"{base_url}/getItemImage?fileName={item['imagePath']}" if item['imagePath'] else None
+            "whId": item['whId']
         }
         for item in items
     ]

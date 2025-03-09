@@ -36,10 +36,12 @@ class Item(Model):
     cost = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
     isManaged = fields.BooleanField(null=False, default=True)
     imagePath = fields.CharField(max_length=255, null=True)
-    criticalValue = fields.IntField(null=False)
+    criticalValue = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
     sellByUnit = fields.BooleanField(null = False)
     moq = fields.DecimalField(max_digits=10, decimal_places=2, null=False)
     unitOfMeasure = fields.CharField(max_length=20, null=True)
+    imageId = fields.CharField(max_length=255, null=True)
+
     class Meta:
         table = "items"
 
@@ -104,6 +106,7 @@ class Customer(Model):
     contactNumber2 = fields.CharField(max_length=20, null=True)
     totalOrderAmount = fields.DecimalField(max_digits=18, decimal_places=2, null=False)
     fileName = fields.CharField(max_length=255, null=True)
+    imageId = fields.CharField(max_length=255, null=True)
 
     class Meta:
         table = "customers"

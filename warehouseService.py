@@ -1,13 +1,11 @@
 from utils import create_response
 from tortoise import Tortoise
-from config import BASE_URL
 from models import WHStockInput, WareHouseItem, Item
 from decimal import Decimal
 
 async def getWHStocks(categoryId, page=1, search=""):
     pageSize = 30
     offset = (page - 1) * pageSize
-    base_url = BASE_URL
 
     sqlQuery = """
        SELECT wh.id, i.name, wh.quantity, i.unitOfMeasure, i.criticalValue, i.sellByUnit, i.moq, i.imagePath
@@ -51,8 +49,7 @@ async def getWHStocks(categoryId, page=1, search=""):
             "criticalValue": item['criticalValue'],
             "sellByUnit": bool(item['sellByUnit']),
             "moq": item['moq'],
-            "imagePath": item['imagePath'],
-            "imageUrl": f"{base_url}/getItemImage?fileName={item['imagePath']}" if item['imagePath'] else None
+            "imagePath": item['imagePath']
         }
         for item in items
     ]
