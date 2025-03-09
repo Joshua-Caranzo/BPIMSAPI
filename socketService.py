@@ -151,8 +151,9 @@ async def dailyTransactionHQ(websocket):
                 COALESCE(SUM(tr.totalAmount), 0) AS dailyTotal,
                 COALESCE(SUM(tr.profit), 0) AS totalProfit
             FROM branches b
-            LEFT JOIN users u ON b.id = u.branchId
-            WHERE DATE(tr.transactionDate) = CURDATE()
+            LEFT JOIN transactions tr 
+                ON tr.branchId = b.Id 
+                AND DATE(tr.transactionDate) = CURDATE()
             GROUP BY b.id;
         """
 
