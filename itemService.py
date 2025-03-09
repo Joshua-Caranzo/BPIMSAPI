@@ -165,7 +165,7 @@ async def getStockHistory(itemId):
     result = await connection.execute_query(sqlQuery, tuple(params))
 
     countQuery = """
-        SELECT COUNT(*) from Stockinputs WHERE branchItemId = %s
+        SELECT COUNT(*) from stockinputs WHERE branchItemId = %s
     """
     totalCountResult = await connection.execute_query(countQuery, (itemId,))
     totalCount = totalCountResult[1][0]['COUNT(*)']
