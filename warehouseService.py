@@ -10,7 +10,7 @@ async def getWHStocks(categoryId, page=1, search=""):
     sqlQuery = """
        SELECT wh.id, i.name, wh.quantity, i.unitOfMeasure, i.criticalValue, i.sellByUnit, i.moq, i.imagePath
        FROM items i
-        INNER JOIN warehouseItems wh ON wh.itemId = i.id
+        INNER JOIN warehouseitems wh ON wh.itemId = i.id
         WHERE i.isManaged = 1
     """
     params = []
@@ -32,7 +32,7 @@ async def getWHStocks(categoryId, page=1, search=""):
     countQuery = """
         SELECT COUNT(*) 
         FROM items i
-        INNER JOIN warehouseItems wh ON wh.itemId = i.id
+        INNER JOIN warehouseitems wh ON wh.itemId = i.id
         WHERE i.isManaged = 1
     """
     totalCountResult = await connection.execute_query(countQuery)
@@ -58,7 +58,7 @@ async def getWHStocks(categoryId, page=1, search=""):
 
 async def getStockHistory(itemId):
     sqlQuery = """
-        SELECT s.*, i.moq from WHStockinputs s
+        SELECT s.*, i.moq from whstockinputs s
         INNER JOIN items i on i.id = s.itemId 
         inner join warehouseitems wh on wh.itemId = i.id 
         WHERE wh.Id = %s
@@ -70,7 +70,7 @@ async def getStockHistory(itemId):
     connection = Tortoise.get_connection('default')
     result = await connection.execute_query(sqlQuery, tuple(params))
     countQuery = """
-        SELECT COUNT(*) from WHStockinputs WHERE itemId = %s
+        SELECT COUNT(*) from whstockinputs WHERE itemId = %s
     """
     totalCountResult = await connection.execute_query(countQuery, (itemId,))
     totalCount = totalCountResult[1][0]['COUNT(*)']

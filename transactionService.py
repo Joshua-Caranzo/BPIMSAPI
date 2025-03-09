@@ -37,7 +37,7 @@ async def getTotalItemCount(cartId):
                     WHEN i.sellbyUnit = 1 THEN ci.quantity 
                     ELSE 1 
                    END) AS total_count
-        FROM cartItems ci
+        FROM cartitems ci
         JOIN items i ON ci.itemId = i.id
         WHERE ci.cartId = %s
     """

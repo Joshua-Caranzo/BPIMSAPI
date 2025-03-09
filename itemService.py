@@ -154,7 +154,7 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
 
 async def getStockHistory(itemId):
     sqlQuery = """
-        SELECT s.*, i.moq from Stockinputs s inner join branchitem bi on s.branchItemId= bi.id
+        SELECT s.*, i.moq from stockinputs s inner join branchitem bi on s.branchItemId= bi.id
         INNER JOIN items i on i.id = bi.itemId WHERE s.branchItemId = %s
     """
     params = [itemId]
@@ -207,7 +207,7 @@ async def getProductsHQ(categoryId, page=1, search=""):
             i.criticalValue,
             i.unitOfMeasure
         FROM items i
-        INNER JOIN Categories c on c.Id = i.categoryId
+        INNER JOIN categories c on c.Id = i.categoryId
         WHERE i.isManaged = 1
     """
 
@@ -273,7 +273,7 @@ async def getProductHQ(itemId):
             i.criticalValue,
             i.unitOfMeasure
         FROM items i
-        INNER JOIN Categories c ON c.Id = i.categoryId
+        INNER JOIN categories c ON c.Id = i.categoryId
         WHERE i.id = %s
         LIMIT 1
     """
