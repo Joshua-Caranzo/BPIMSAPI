@@ -3,6 +3,9 @@ from utils import create_response
 from datetime import datetime, time
 from decimal import Decimal
 from tortoise import Tortoise
+import pytz
+
+sgt = pytz.timezone('Asia/Singapore')
 
 """ GET METHODS """
 async def getCartandItems(userId):
@@ -280,7 +283,7 @@ async def processPayment(cartId, amountReceived):
         totalAmount=total_amount,
         cashierId=cart.userId,
         slipNo=slip_no,
-        transactionDate=datetime.now(),
+        transactionDate = datetime.now(pytz.utc).astimezone(sgt),
         customerId=cart.customerId,
         branchId=user.branchId,
         profit=total_profit,  # Updated profit calculation
@@ -344,20 +347,24 @@ async def processPayment(cartId, amountReceived):
     return create_response(True, message, transactionRequest), 200
 
 async def generate_slip_no(cashierId: int) -> str:
-    dateToday = datetime.now().strftime('%m%d%y')
-
+    now_sg = datetime.now(pytz.utc).astimezone(sgt)
+    
+    dateToday = now_sg.strftime('%m%d%y')
     store_code = f"{cashierId:02d}"
     
-    today_date = datetime.now().date()
+    today_date = now_sg.date()
 
-    start_of_day = datetime.combine(today_date, time.min)
+    start_of_day = sgt.localize(datetime.combine(today_date, time.min))
+    end_of_day = sgt.localize(datetime.combine(today_date, time.max))
 
-    end_of_day = datetime.combine(today_date, time.max)
+    transaction_count = await Transaction.filter(
+        transactionDate__gte=start_of_day, 
+        transactionDate__lte=end_of_day
+    ).count()
 
-    transaction_count = await Transaction.filter(transactionDate__gte=start_of_day, transactionDate__lte=end_of_day).count()
     slip_count = transaction_count + 1
-    slip_count_str = f"{slip_count:03d}" 
-    
+    slip_count_str = f"{slip_count:03d}"
+
     slip_no = f"CC{store_code}-{dateToday}-{slip_count_str}"
 
     return slip_no
