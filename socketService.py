@@ -1,7 +1,7 @@
 
 from tortoise import Tortoise
 import asyncio
-from datetime import datetime, time
+from datetime import datetime, time, timezone, timedelta
 import pytz
 
 async def criticalItems(websocket, branchId):
@@ -22,9 +22,9 @@ async def criticalItems(websocket, branchId):
         await asyncio.sleep(5)
 
 def get_time_periods():
-    sgt = pytz.timezone('Asia/Singapore')
-
-    current_time = datetime.now(pytz.utc).astimezone(sgt).time()
+    # Get current Singapore time (UTC+8)
+    now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+    current_time = now_sg.time()
 
     periods = [
         {"id": 1, "start": time(7, 0), "end": time(9, 30), "label": "7-9:30 AM"},
@@ -34,7 +34,7 @@ def get_time_periods():
     ]
 
     periods_to_include = []
-    
+
     for period in periods:
         if period["start"] <= current_time <= period["end"]:
             periods_to_include.append(period)
@@ -45,6 +45,9 @@ def get_time_periods():
 
 async def dailyTransaction(websocket, branchId):
     while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        singapore_date = now_sg.date()
+
         periods_to_include = get_time_periods()
         totalAmountPerPeriod = {}
 
@@ -55,7 +58,7 @@ async def dailyTransaction(websocket, branchId):
                 SELECT tr.totalAmount
                 FROM transactions tr
                 INNER JOIN users u ON u.id = tr.cashierId
-                WHERE DATE(tr.transactionDate) = CURDATE()
+                WHERE DATE(tr.transactionDate) = '{singapore_date}'
                 AND TIME(tr.transactionDate) BETWEEN '{period["start"]}' AND '{period["end"]}'
                 AND tr.branchId = {branchId}
                 ORDER BY tr.transactionDate;
@@ -75,7 +78,7 @@ async def dailyTransaction(websocket, branchId):
             SELECT tr.id, tr.totalAmount, tr.slipNo, tr.transactionDate, u.name as cashierName
             FROM transactions tr
             INNER JOIN users u ON u.id = tr.cashierId
-            WHERE DATE(tr.transactionDate) = CURDATE()
+            WHERE DATE(tr.transactionDate) = '{singapore_date}'
             AND tr.branchId = {branchId}
             ORDER BY tr.transactionDate;
         """
@@ -97,7 +100,7 @@ async def dailyTransaction(websocket, branchId):
                 "id": tr["id"],
                 "totalAmount": float(tr["totalAmount"]),
                 "slipNo": tr["slipNo"],
-                "transactionDate":  tr["transactionDate"],
+                "transactionDate": tr["transactionDate"],
                 "cashierName": tr["cashierName"],
                 "items": items 
             })
@@ -113,12 +116,16 @@ async def dailyTransaction(websocket, branchId):
 
 async def totalSales(websocket, branchId):
     while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        singapore_year = now_sg.year
+        singapore_month = now_sg.month
+
         connection = Tortoise.get_connection('default')
 
         totalSalesYearQuery = f"""
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
-            WHERE YEAR(transactionDate) = YEAR(CURDATE())
+            WHERE YEAR(transactionDate) = {singapore_year}
             AND branchId = {branchId}
         """
         totalSalesPerYear = await connection.execute_query_dict(totalSalesYearQuery)
@@ -126,7 +133,7 @@ async def totalSales(websocket, branchId):
         totalSalesMonthQuery = f"""
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
-            WHERE YEAR(transactionDate) = YEAR(CURDATE()) AND MONTH(transactionDate) = MONTH(CURDATE())
+            WHERE YEAR(transactionDate) = {singapore_year} AND MONTH(transactionDate) = {singapore_month}
             AND branchId = {branchId}
         """
         totalSalesPerMonth = await connection.execute_query_dict(totalSalesMonthQuery)
@@ -145,9 +152,12 @@ async def totalSales(websocket, branchId):
 
 async def dailyTransactionHQ(websocket):
     while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        singapore_date = now_sg.date()
+
         connection = Tortoise.get_connection('default')
 
-        branchTransactionQuery = """
+        branchTransactionQuery = f"""
             SELECT 
                 b.name AS branchName, 
                 COALESCE(SUM(tr.totalAmount), 0) AS dailyTotal,
@@ -155,13 +165,13 @@ async def dailyTransactionHQ(websocket):
             FROM branches b
             LEFT JOIN transactions tr 
                 ON tr.branchId = b.Id 
-                AND DATE(tr.transactionDate) = CURDATE()
+                AND DATE(tr.transactionDate) = '{singapore_date}'
             GROUP BY b.id;
         """
 
         branchTransactions = await connection.execute_query_dict(branchTransactionQuery)
 
-        topItemsQuery = """
+        topItemsQuery = f"""
             WITH RankedItems AS (
             SELECT 
                 b.name AS branchName, 
@@ -172,7 +182,7 @@ async def dailyTransactionHQ(websocket):
             JOIN items i ON ti.itemId = i.id
             JOIN transactions tr ON ti.transactionId = tr.id
             JOIN branches b ON tr.branchId = b.id
-            WHERE DATE(tr.transactionDate) = CURDATE()
+            WHERE DATE(tr.transactionDate) = '{singapore_date}'
             GROUP BY b.id, i.id
         )
         SELECT branchName, itemName, totalSales
@@ -215,19 +225,24 @@ async def dailyTransactionHQ(websocket):
 
 async def totalSalesHQ(websocket):
     while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        singapore_year = now_sg.year
+        singapore_month = now_sg.month
+
         connection = Tortoise.get_connection('default')
 
         totalSalesYearQuery = f"""
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
-            WHERE YEAR(transactionDate) = YEAR(CURDATE())
+            WHERE YEAR(transactionDate) = {singapore_year}
         """
         totalSalesPerYear = await connection.execute_query_dict(totalSalesYearQuery)
 
         totalSalesMonthQuery = f"""
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
-            WHERE YEAR(transactionDate) = YEAR(CURDATE()) AND MONTH(transactionDate) = MONTH(CURDATE())
+            WHERE YEAR(transactionDate) = {singapore_year} 
+            AND MONTH(transactionDate) = {singapore_month}
         """
         totalSalesPerMonth = await connection.execute_query_dict(totalSalesMonthQuery)
 

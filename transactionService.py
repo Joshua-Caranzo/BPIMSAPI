@@ -1,6 +1,6 @@
 from models import Item, Cart, CartItems, Transaction, TransactionItem,User, Branch, Customer, BranchItem
 from utils import create_response
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from tortoise import Tortoise
 import pytz
@@ -283,7 +283,7 @@ async def processPayment(cartId, amountReceived):
         totalAmount=total_amount,
         cashierId=cart.userId,
         slipNo=slip_no,
-        transactionDate = datetime.now(pytz.utc).astimezone(sgt),
+        transactionDate = datetime.now(timezone.utc) + timedelta(hours=8),
         customerId=cart.customerId,
         branchId=user.branchId,
         profit=total_profit,  # Updated profit calculation
@@ -347,15 +347,15 @@ async def processPayment(cartId, amountReceived):
     return create_response(True, message, transactionRequest), 200
 
 async def generate_slip_no(cashierId: int) -> str:
-    now_sg = datetime.now(pytz.utc).astimezone(sgt)
+    now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
     
     dateToday = now_sg.strftime('%m%d%y')
     store_code = f"{cashierId:02d}"
     
     today_date = now_sg.date()
 
-    start_of_day = sgt.localize(datetime.combine(today_date, time.min))
-    end_of_day = sgt.localize(datetime.combine(today_date, time.max))
+    start_of_day = datetime.combine(today_date, time.min, timezone.utc) + timedelta(hours=8)
+    end_of_day = datetime.combine(today_date, time.max, timezone.utc) + timedelta(hours=8)
 
     transaction_count = await Transaction.filter(
         transactionDate__gte=start_of_day, 
