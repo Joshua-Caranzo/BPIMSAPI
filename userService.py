@@ -118,7 +118,9 @@ async def addUser(user):
         email=user['email'],
         password = user['password']
     )
-
+    if int(user.departmentId) == 1: 
+        await Cart.create(userId=user.id, subTotal=0.00)
+        
     return create_response(True, "User added successfully.", user.id), 201
 
 async def editUser(user):
