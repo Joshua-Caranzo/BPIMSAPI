@@ -1,7 +1,8 @@
 
 from tortoise import Tortoise
 import asyncio
-import datetime
+from datetime import datetime, time
+import pytz
 
 async def criticalItems(websocket, branchId):
     while True:
@@ -21,13 +22,15 @@ async def criticalItems(websocket, branchId):
         await asyncio.sleep(5)
 
 def get_time_periods():
-    current_time = datetime.datetime.now().time()
+    sgt = pytz.timezone('Asia/Singapore')
+
+    current_time = datetime.now(pytz.utc).astimezone(sgt).time()
 
     periods = [
-        {"id": 1, "start": datetime.time(7, 0), "end": datetime.time(9, 30), "label": "7-9:30 AM"},
-        {"id": 2, "start": datetime.time(9, 31), "end": datetime.time(12, 0), "label": "9:30-12:00 PM"},
-        {"id": 3, "start": datetime.time(12, 1), "end": datetime.time(14, 30), "label": "12:00-2:30 PM"},
-        {"id": 4, "start": datetime.time(14, 31), "end": datetime.time(17, 0), "label": "2:30-5:00 PM"},
+        {"id": 1, "start": time(7, 0), "end": time(9, 30), "label": "7-9:30 AM"},
+        {"id": 2, "start": time(9, 31), "end": time(12, 0), "label": "9:30-12:00 PM"},
+        {"id": 3, "start": time(12, 1), "end": time(14, 30), "label": "12:00-2:30 PM"},
+        {"id": 4, "start": time(14, 31), "end": time(17, 0), "label": "2:30-5:00 PM"},
     ]
 
     periods_to_include = []
@@ -35,8 +38,7 @@ def get_time_periods():
     for period in periods:
         if period["start"] <= current_time <= period["end"]:
             periods_to_include.append(period)
-
-        if period["end"] < current_time:
+        elif period["end"] < current_time:
             periods_to_include.append(period)
 
     return periods_to_include
