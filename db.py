@@ -2,7 +2,7 @@
 
 DATABASE_CONFIG = {
     'connections': {
-        'default': 'mysql://root:3x@c0nlt@localhost:3306/bpimsdb',
+        'default': 'mysql://root:NRtsEqqNGzErwvHgjeyExaxkQPlnUNad@maglev.proxy.rlwy.net:14138/railway',
     },
     'apps': {
         'models': {
