@@ -12,6 +12,9 @@ async def login_user(email, encryptedPassword):
     if not user:
         return create_response(False, 'There was an issue with your login. Please try again.'), 200
     
+    if user.isActive == False:
+        return create_response(False, 'There was an issue with your login. Please try again.'), 200
+
     if encryptedPassword == user.encryptedPassword:
 
         branch = await Branch.filter(id=user.branchId).first() if user.branchId else None
@@ -43,6 +46,7 @@ async def getUsers(search = ""):
         SELECT u.*, d.name as deptName, b.name as branchName FROM users u 
         inner join departments d on d.Id = u.departmentId 
         left join branches b on b.id = u.branchId
+        WHERE u.isActive = 1
     """
     params = []
 
@@ -116,7 +120,8 @@ async def addUser(user):
         hasHeadAccess = user['hasHeadAccess'] if user['hasHeadAccess'] is not None else False,
         encryptedPassword=hashed_password,
         email=user['email'],
-        password = user['password']
+        password = user['password'],
+        isActive = True
     )
     if int(user.departmentId) == 1: 
         await Cart.create(userId=user.id, subTotal=0.00)
@@ -156,3 +161,15 @@ async def getDepartments():
 async def getBranches():
     branches = await Branch.all().order_by("name")
     return [{"id": b.id, "name": b.name} for b in branches]
+
+async def setInactiveUser(id):
+    existing_user = await User.get(id=id)
+    
+    if not existing_user:
+        return create_response(False, "User not found."), 404
+    
+    existing_user.isActive = False
+
+    await existing_user.save()
+
+    return create_response(True, "User updated successfully.", existing_user.id, None), 200

@@ -1,8 +1,7 @@
-from models import BranchItem, StockInput, Item, Branch, WareHouseItem
-from utils import create_response, sanitize_filename, upload_media, delete_media
+from models import BranchItem, StockInput, Item, Branch, WareHouseItem, CartItems
+from utils import create_response, upload_media, delete_media
 from tortoise import Tortoise
 from decimal import Decimal
-import os
 
 """ GET METHODS """
 async def get_products(categoryId, branchId, page=1, search=""):
@@ -389,6 +388,12 @@ async def saveItem(data, file):
         existing_item.unitOfMeasure = unitOfMeasure
         existing_item.criticalValue = criticalValue
 
+        cartItems = await CartItems.all()
+
+        for i in cartItems:
+            if(i.itemId == existing_item.id):
+                await i.delete()
+                
         await existing_item.save()
 
     if(file != None):
@@ -409,10 +414,8 @@ async def deleteItem(id):
     item.isManaged = False
     if item.imagePath:
         result = delete_media(item.imageId)
-        if(result == False):
-            return create_response(False, "An error occured.", None, None), 200
         
-    item.save()
+    await item.save()
     
     return create_response(True, "Item deleted successfully.", None, None), 200
 

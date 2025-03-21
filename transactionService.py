@@ -243,6 +243,17 @@ async def updateCustomer(cartId, custId):
 
     return create_response(True, message), 200
 
+def adjust_transaction_time(transaction_dt):
+    """Adjusts the transaction time to 5 PM if it's after 5 PM and before 7 AM if earlier."""
+    transaction_time = transaction_dt.time()
+
+    if transaction_time >= time(17, 0):  
+        transaction_dt = transaction_dt.replace(hour=17, minute=0, second=0, microsecond=0)
+    elif transaction_time < time(7, 0): 
+        transaction_dt = transaction_dt.replace(hour=7, minute=0, second=0, microsecond=0)
+
+    return transaction_dt
+
 async def processPayment(cartId, amountReceived):
     cart = await Cart.get_or_none(id=cartId)
 
@@ -255,12 +266,11 @@ async def processPayment(cartId, amountReceived):
     cartItems = await CartItems.filter(cartId=cartId)
     transactionItems = []
 
-    # Calculate total amount (revenue)
     total_amount = cart.subTotal
     if cart.discount:
-        total_amount -= cart.discount  # Discount reduces revenue
+        total_amount -= cart.discount  
     if cart.deliveryFee:
-        total_amount += cart.deliveryFee  # Delivery fee increases revenue
+        total_amount += cart.deliveryFee  
 
     if total_amount > float(amountReceived):
         return create_response(False, 'Transaction Error. Please Try Again!'), 404
@@ -268,25 +278,25 @@ async def processPayment(cartId, amountReceived):
     slip_no = await generate_slip_no(cart.userId)
     total_profit = 0 
 
-    # Calculate total cost of goods sold (COGS)
     total_cogs = 0
     for cItem in cartItems:
         item = await Item.get_or_none(id=cItem.itemId)
         if item:
-            total_cogs += item.cost * cItem.quantity  # Sum up COGS
+            total_cogs += item.cost * cItem.quantity  
 
-    # Calculate profit: Revenue - COGS - Discounts + Delivery Fees
     total_profit = total_amount - total_cogs
+    current_time = datetime.now(timezone.utc) + timedelta(hours=8)
+    adjusted_time = adjust_transaction_time(current_time)
 
     transaction = await Transaction.create(
         amountReceived=float(amountReceived),
         totalAmount=total_amount,
         cashierId=cart.userId,
         slipNo=slip_no,
-        transactionDate = datetime.now(timezone.utc) + timedelta(hours=8),
+        transactionDate = adjusted_time,
         customerId=cart.customerId,
         branchId=user.branchId,
-        profit=total_profit,  # Updated profit calculation
+        profit=total_profit,
         discount=cart.discount,
         deliveryFee=cart.deliveryFee
     )
@@ -378,7 +388,8 @@ async def getTransactionHistory(transactionId):
     branch = await Branch.get_or_none(id=transaction.branchId)
     customer = await Customer.get_or_none(id=transaction.customerId) if transaction.customerId else None
     transactionItems = await TransactionItem.filter(transactionId=transactionId)
-    
+    user = await User.get_or_none(id = transaction.cashierId)
+
     items = []
     for tItem in transactionItems:
         item = await Item.get_or_none(id=tItem.itemId)
@@ -390,7 +401,7 @@ async def getTransactionHistory(transactionId):
                 "price": item.price,
                 "quantity": tItem.quantity,
                 "amount": tItem.amount,
-                "sellByUnit": bool(item.sellByUnit)
+                "sellByUnit": item.sellByUnit
             })
     
     transactionData = {
@@ -403,9 +414,121 @@ async def getTransactionHistory(transactionId):
             "branch": branch.name if branch else None,
             "deliveryFee": transaction.deliveryFee,
             "discount": transaction.discount,
-            "customerName": customer.name if customer else None
+            "customerName": customer.name if customer else None,
+            "cashier": user.name
         },
         "transactionItems": items
     }
     
     return create_response(True, 'Transaction retrieved successfully', transactionData), 200
+
+async def getAllTransactionsAsync(branchId, page=1, search=""):
+    pageSize = 30
+    offset = (page - 1) * pageSize
+
+    params = [branchId]  
+
+    dailyTransactsDto = """
+        SELECT tr.id, tr.totalAmount, tr.slipNo, tr.transactionDate, u.name as cashierName
+        FROM transactions tr
+        INNER JOIN users u ON u.id = tr.cashierId
+        WHERE tr.branchId = %s
+    """
+    
+    if search:
+        dailyTransactsDto += " AND tr.slipNo LIKE %s"
+        params.append(f'%{search}%')
+    dailyTransactsDto += " ORDER BY tr.transactionDate DESC"
+    dailyTransactsDto += " LIMIT %s OFFSET %s"
+    params.extend([pageSize, offset])
+
+    dailyTransactions = await Tortoise.get_connection("default").execute_query_dict(dailyTransactsDto, tuple(params))
+
+    transactionsDto = []
+
+    for tr in dailyTransactions:
+        itemsQuery = """
+            SELECT ti.id, i.name as itemName, i.id as itemId, ti.quantity 
+            FROM transactionitems ti
+            INNER JOIN items i ON i.id = ti.itemId
+            WHERE ti.transactionId = %s
+        """
+        items = await Tortoise.get_connection("default").execute_query_dict(itemsQuery, (tr['id'],))
+
+        transactionsDto.append({
+            "id": tr["id"],
+            "totalAmount": float(tr["totalAmount"]),
+            "slipNo": tr["slipNo"],
+            "transactionDate": tr["transactionDate"],
+            "cashierName": tr["cashierName"],
+            "items": items
+        })
+
+    transactions = transactionsDto
+
+    total_count_query = "SELECT COUNT(*) as total FROM transactions WHERE branchId = %s"
+    total_count_result = await Tortoise.get_connection("default").execute_query_dict(total_count_query, (branchId,))  # Exclude LIMIT & OFFSET params
+    total_count = total_count_result[0]["total"] if total_count_result else 0
+
+    return create_response(True, "Successfully Retrieved", transactions, None, total_count), 200
+
+async def getAllTransactionsAsyncHQ(branchId=None, page=1, search=""):
+    pageSize = 30
+    offset = (page - 1) * pageSize
+    params = []
+
+    dailyTransactsDto = """
+        SELECT tr.id, tr.totalAmount, tr.slipNo, tr.transactionDate, 
+               u.name as cashierName, b.name as branchName
+        FROM transactions tr
+        INNER JOIN users u ON u.id = tr.cashierId
+        INNER JOIN branches b ON b.id = tr.branchId
+    """
+
+    if branchId is not None:
+        dailyTransactsDto += " WHERE tr.branchId = %s"
+        params.append(branchId)
+
+    if search:
+        dailyTransactsDto += " AND" if branchId is not None else " WHERE"
+        dailyTransactsDto += " tr.slipNo LIKE %s"
+        params.append(f'%{search}%')
+
+    dailyTransactsDto += " ORDER BY tr.transactionDate DESC"
+    dailyTransactsDto += " LIMIT %s OFFSET %s"
+    params.extend([pageSize, offset])
+
+    dailyTransactions = await Tortoise.get_connection("default").execute_query_dict(dailyTransactsDto, tuple(params))
+
+    transactionsDto = []
+
+    for tr in dailyTransactions:
+        itemsQuery = """
+            SELECT ti.id, i.name as itemName, i.id as itemId, ti.quantity 
+            FROM transactionitems ti
+            INNER JOIN items i ON i.id = ti.itemId
+            WHERE ti.transactionId = %s
+        """
+        items = await Tortoise.get_connection("default").execute_query_dict(itemsQuery, (tr['id'],))
+
+        transactionsDto.append({
+            "id": tr["id"],
+            "totalAmount": float(tr["totalAmount"]),
+            "slipNo": tr["slipNo"],
+            "transactionDate": tr["transactionDate"],
+            "cashierName": tr["cashierName"],
+            "branchName": tr["branchName"],
+            "items": items
+        })
+
+    total_count_query = "SELECT COUNT(*) as total FROM transactions"
+    count_params = []
+
+    if branchId is not None:
+        total_count_query += " WHERE branchId = %s"
+        count_params.append(branchId)
+
+    total_count_result = await Tortoise.get_connection("default").execute_query_dict(total_count_query, tuple(count_params))
+    total_count = total_count_result[0]["total"] if total_count_result else 0
+
+    return create_response(True, "Successfully Retrieved", transactionsDto, None, total_count), 200

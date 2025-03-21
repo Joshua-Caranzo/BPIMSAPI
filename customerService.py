@@ -8,8 +8,10 @@ async def getCustomerList(branchId = None, search = ""):
     customer_query = Customer.all().order_by('name')
 
     if branchId:
-        customer_query = customer_query.filter(branchId=branchId)
-
+        customer_query = customer_query.filter(
+            Q(branchId=branchId) | Q(branchId__isnull=True)
+        )
+        
     if search:
         customer_query = customer_query.filter(Q(name__icontains=search))
 

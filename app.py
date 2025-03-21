@@ -1,4 +1,4 @@
-from quart import Quart, request, send_file, websocket
+from quart import Quart, request, send_file, websocket, send_from_directory
 from tortoise import Tortoise
 import userService
 import itemService
@@ -203,6 +203,45 @@ async def getWHStockHistory():
     response = await warehouseService.getStockHistory(id) 
     return response
 
+@app.route('/getSupplierStockHistory', methods=['GET'])
+@token_required
+async def getSupplierStockHistory():
+    id = request.args.get('supplierId')
+    response = await warehouseService.getSupplierStockHistory(id) 
+    return response
+
+@app.route('/getAllTransactions', methods=['GET'])
+@token_required
+async def getAllTransactionsAsync():
+    branchId = request.args.get('branchId')
+    page = request.args.get('page')
+    search = request.args.get('search')
+    response = await transactionService.getAllTransactionsAsync(int(branchId), int(page), search) 
+    return response
+
+@app.route('/getAllTransactionsHQ', methods=['GET'])
+@token_required
+async def getAllTransactionsAsyncHQ():
+    branchId = request.args.get('branchId')
+    page = request.args.get('page')
+    search = request.args.get('search')
+    response = await transactionService.getAllTransactionsAsyncHQ(branchId, int(page), search) 
+    return response
+
+@app.route('/getSupplierList', methods=['GET'])
+@token_required
+async def getSupplierList():  
+    search = request.args.get('search')
+    response = await warehouseService.getSupplierList(search) 
+    return response
+
+@app.route('/getSupplier', methods=['GET'])
+@token_required
+async def getSupplier():  
+    id = request.args.get('id')
+    response = await warehouseService.getSupplier(int(id)) 
+    return response
+
 """ POST AND PUT METHODS """
 
 @app.route('/loginUser', methods=['POST'])
@@ -355,6 +394,30 @@ async def createWHStockInput():
     response = await warehouseService.createStockInput(stockInput) 
     return response
 
+@app.route('/setUserInactive', methods=['POST'])
+@token_required
+async def setUserInactive():
+    data = await request.json
+    id = data.get('id')
+    response = await userService.setInactiveUser(id) 
+    return response
+
+@app.route('/saveSupplier', methods=['POST'])
+@token_required
+async def saveSupplier():
+    data = await request.json
+    supplier = data.get('supplier')
+    response = await warehouseService.saveSupplier(supplier) 
+    return response
+
+@app.route('/removeSupplier', methods=['POST'])
+@token_required
+async def removeSupplier():
+    data = await request.json
+    id = data.get('id')
+    response = await warehouseService.removeSupplier(id) 
+    return response
+
 """ SOCKET METHODS """
 
 @app.websocket('/ws/criticalItems')
@@ -387,6 +450,28 @@ async def critical_items_ws_HQ():
 @app.websocket('/ws/criticalItemsWH')
 async def critical_items_ws_WH():
     await socketService.criticalItemsWH(websocket)
+
+@app.websocket('/ws/analyticsData')
+async def analyticsData():
+    branch_id = websocket.args.get('branchId')
+    await socketService.analyticsData(websocket, branch_id)
+
+@app.websocket('/ws/analysisReport')
+async def analysisReport():
+    branch_id = websocket.args.get('branchId')
+    await socketService.analysisReport(websocket, branch_id)
+
+@app.websocket('/ws/analyticsDataHQ')
+async def analyticsDataHQ():
+    await socketService.analyticsDataHQ(websocket)
+
+@app.websocket('/ws/analysisReportHQ')
+async def analysisReportHQ():
+    await socketService.analysisReportHQ(websocket)
+
+@app.route('/static/images/<filename>')
+def get_image(filename):
+    return send_from_directory(os.path.join(app.root_path, 'static/images'), filename)
 
 if __name__ == '__main__':
     asyncio.run(init())
