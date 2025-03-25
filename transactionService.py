@@ -137,6 +137,7 @@ async def addItemToCart(cartId, itemId, quantity):
 
     if existing_cart_item:
         existing_cart_item.quantity += quantity_decimal
+        print('cart Subtotal:', cart.subTotal)
         cart.subTotal += item.price * quantity_decimal
         print('Quantity:', quantity_decimal)
         print('New Added Value:',  item.price * quantity_decimal)
@@ -149,6 +150,7 @@ async def addItemToCart(cartId, itemId, quantity):
         await CartItems.create(cartId=cart.id, itemId=item.id, quantity=quantity_decimal)
         message = 'Item successfully added to the cart'
         cart.subTotal += item.price * quantity_decimal
+        print(cart.subTotal)
         await cart.save()        
 
     return create_response(True, message, None, None), 200
