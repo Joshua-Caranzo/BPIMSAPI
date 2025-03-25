@@ -28,7 +28,7 @@ async def get_products(categoryId, branchId, page=1, search=""):
                 JOIN transactions tr ON ti.transactionId = tr.id
                 JOIN branches b ON tr.branchId = b.id
                 JOIN branchitem bi ON bi.itemId = i.id AND bi.branchId = b.id
-                WHERE b.id = %s
+                WHERE b.id = %s AND i.isManaged = 1
                 GROUP BY i.id, i.name, i.categoryId, i.price, i.cost, i.isManaged, i.imagePath, bi.quantity, i.sellByUnit
             )
             SELECT * FROM HotItems 
