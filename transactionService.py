@@ -116,7 +116,6 @@ async def deleteAllCartItems(cartId):
 
     return create_response(True, message), 200
 
-from decimal import Decimal
 
 async def addItemToCart(cartId, itemId, quantity):
     item = await Item.get_or_none(id=itemId)
@@ -149,7 +148,6 @@ async def addItemToCart(cartId, itemId, quantity):
     cart.subTotal += item.price * quantity_decimal
     await cart.save()       
     return create_response(True, message, None, None), 200
-
 
 async def updateItemQuantity(cartItemId, quantity):
     cartItem = await CartItems.get_or_none(id = cartItemId)
