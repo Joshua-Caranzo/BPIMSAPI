@@ -1,15 +1,16 @@
 from utils import create_response
 from tortoise import Tortoise
-from models import WHStockInput, WareHouseItem, Item, Supplier
+from models import WHStockInput, WareHouseItem, Item, Supplier, SupplierReturn
 from decimal import Decimal
 from tortoise.queryset import Q 
+from datetime import datetime
 
 async def getWHStocks(categoryId, page=1, search=""):
     pageSize = 30
     offset = (page - 1) * pageSize
 
     sqlQuery = """
-       SELECT wh.id, i.name, wh.quantity, i.unitOfMeasure, i.criticalValue, i.sellByUnit, i.moq, i.imagePath
+       SELECT wh.id, i.name, wh.quantity, i.unitOfMeasure, i.storeCriticalValue, i.sellByUnit, i.whCriticalValue, i.imagePath
        FROM items i
         INNER JOIN warehouseitems wh ON wh.itemId = i.id
         WHERE i.isManaged = 1
@@ -17,7 +18,7 @@ async def getWHStocks(categoryId, page=1, search=""):
     params = []
 
     if int(categoryId) == 1:
-        sqlQuery += " AND wh.quantity < i.criticalValue"
+        sqlQuery += " AND wh.quantity < i.whCriticalValue"
 
     if search:
         sqlQuery += " AND i.name LIKE %s"
@@ -47,9 +48,9 @@ async def getWHStocks(categoryId, page=1, search=""):
             "name": item['name'],
             "quantity": item['quantity'],
             "unitOfMeasure": item['unitOfMeasure'],
-            "criticalValue": item['criticalValue'],
+            "storeCriticalValue": item['storeCriticalValue'],
             "sellByUnit": bool(item['sellByUnit']),
-            "moq": item['moq'],
+            "whCriticalValue": item['whCriticalValue'],
             "imagePath": item['imagePath']
         }
         for item in items
@@ -59,7 +60,7 @@ async def getWHStocks(categoryId, page=1, search=""):
 
 async def getStockHistory(itemId):
     sqlQuery = """
-        SELECT s.*, i.moq, su.name as deliveredByName, i.name, i.sellByUnit from whstockinputs s
+        SELECT s.*, i.whCriticalValue, su.name as deliveredByName, i.name, i.sellByUnit from whstockinputs s
         INNER JOIN items i on i.id = s.itemId 
         inner join warehouseitems wh on wh.itemId = i.id
         LEFT JOIN suppliers su ON su.Id = s.deliveredBy
@@ -83,7 +84,7 @@ async def getStockHistory(itemId):
         {
             "id": item['id'],
             "qty": item['qty'],
-            "moq": item['moq'],
+            "whCriticalValue": item['whCriticalValue'],
             "deliveryDate": item['deliveryDate'],
             "deliveredBy": item['deliveredBy'],
             "deliveredByName": item['deliveredByName'],
@@ -102,12 +103,11 @@ async def createStockInput(stockInput):
 
     if not whItem:
         return create_response(False, 'Item not found', None, None), 400
-
+    delivered_by = None if stockInput['deliveredBy'] == 0 else stockInput['deliveredBy']
     await WHStockInput.create(
         qty=stockInput['qty'],
-        moq=item.moq,
         deliveryDate=stockInput['deliveryDate'],
-        deliveredBy=stockInput['deliveredBy'],
+        deliveredBy=delivered_by,
         expectedQty=stockInput['expectedTotalQty'],
         actualQty=stockInput['actualTotalQty'],
         itemId=whItem.itemId
@@ -187,7 +187,7 @@ async def removeSupplier(id):
 
 async def getSupplierStockHistory(supplierId):
     sqlQuery = """
-        SELECT s.*, i.moq, su.name as deliveredByName, i.name, i.sellByUnit from whstockinputs s
+        SELECT s.*, i.whCriticalValue, su.name as deliveredByName, i.name, i.sellByUnit from whstockinputs s
         INNER JOIN items i on i.id = s.itemId 
         inner join warehouseitems wh on wh.itemId = i.id
         INNER JOIN suppliers su ON su.Id = s.deliveredBy
@@ -213,7 +213,7 @@ async def getSupplierStockHistory(supplierId):
         {
             "id": item['id'],
             "qty": item['qty'],
-            "moq": item['moq'],
+            "whCriticalValue": item['whCriticalValue'],
             "deliveryDate": item['deliveryDate'],
             "deliveredBy": item['deliveredBy'],
             "deliveredByName": item['deliveredByName'],
@@ -225,3 +225,67 @@ async def getSupplierStockHistory(supplierId):
         for item in items
     ]
     return create_response(True, 'Items Successfully Retrieved', itemList, None, totalCount), 200
+
+async def editWHStock(id, qty):
+    whItem = await WareHouseItem.get_or_none(id=id)
+
+    if not whItem:
+        return create_response(False, 'Item not found', None, None), 200
+
+    whItem.quantity = Decimal(str(qty))
+    await whItem.save()
+    
+    return create_response(True, "Success", None, None), 200
+
+async def returnToSupplier(returnStock):
+    whItem = await WareHouseItem.get_or_none(id=returnStock['whItemId'])
+
+    if not whItem:
+        return create_response(False, 'Item not found', None, None), 200
+
+    await SupplierReturn.create(
+        supplierId=returnStock['supplierId'],
+        whItemId=returnStock['whItemId'],
+        reason=returnStock['reason'],
+        quantity=Decimal(str(returnStock['quantity'])),
+        date=datetime.now()
+    )
+
+    whItem.quantity -= Decimal(str(returnStock['quantity']))
+    await whItem.save()
+
+    return create_response(True, "Success", None, None), 200
+
+async def getReturnToStockHistory(whItemId):
+    sqlQuery = """
+        SELECT sr.id, sr.supplierId, s.name as supplierName, sr.whItemId, sr.reason, sr.quantity, sr.date
+        FROM supplierreturn sr
+        LEFT JOIN suppliers s ON s.id = sr.supplierId
+        WHERE sr.whItemId = %s
+        ORDER BY sr.id
+    """
+    params = [whItemId]
+
+    connection = Tortoise.get_connection('default')
+    result = await connection.execute_query(sqlQuery, tuple(params))
+
+    countQuery = "SELECT COUNT(*) FROM supplierreturn WHERE whItemId = %s"
+    totalCountResult = await connection.execute_query(countQuery, (whItemId,))
+    totalCount = totalCountResult[1][0]['COUNT(*)']
+
+    items = result[1]
+
+    itemList = [
+        {
+            "id": item['id'],
+            "supplierId": item['supplierId'],
+            "supplierName": item['supplierName'],
+            "whItemId": item['whItemId'],
+            "reason": item['reason'],
+            "quantity": item['quantity'],
+            "date": item['date']
+        }
+        for item in items
+    ]
+
+    return create_response(True, 'Return to Stock History Retrieved Successfully', itemList, None, totalCount), 200

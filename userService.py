@@ -1,8 +1,9 @@
 import jwt
 from config import SECRET_KEY  
 from utils import create_response, hash_password_md5
-from models import User, Branch, Department, Cart 
+from models import User, Branch, Department, Cart, Item, BranchItem
 from tortoise import Tortoise
+from decimal import Decimal
 
 async def login_user(email, encryptedPassword):
     if not email or not encryptedPassword:
@@ -14,10 +15,12 @@ async def login_user(email, encryptedPassword):
     
     if user.isActive == False:
         return create_response(False, 'There was an issue with your login. Please try again.'), 200
-
+    
+    branch = await Branch.filter(id=user.branchId).first() if user.branchId else None
+    if branch and not branch.isActive:
+        return create_response(False, 'Your branch is inactive. Please contact support.'), 200
+    
     if encryptedPassword == user.encryptedPassword:
-
-        branch = await Branch.filter(id=user.branchId).first() if user.branchId else None
         department = await Department.filter(id=user.departmentId).first() if user.departmentId else None
         cart = await Cart.filter(userId=user.id).first() if user.id else None
         user_details = {
@@ -123,7 +126,7 @@ async def addUser(user):
         password = user['password'],
         isActive = True
     )
-    if int(user.departmentId) == 1: 
+    if int(user.departmentId) == 1 or int(user.departmentId) == 4: 
         await Cart.create(userId=user.id, subTotal=0.00)
         
     return create_response(True, "User added successfully.", user.id), 201
@@ -159,7 +162,7 @@ async def getDepartments():
     return [{"id": d.id, "name": d.name} for d in departments]
 
 async def getBranches():
-    branches = await Branch.all().order_by("name")
+    branches = await Branch.filter(isActive=True).order_by("name")
     return [{"id": b.id, "name": b.name} for b in branches]
 
 async def setInactiveUser(id):
@@ -173,3 +176,35 @@ async def setInactiveUser(id):
     await existing_user.save()
 
     return create_response(True, "User updated successfully.", existing_user.id, None), 200
+
+async def setBranchInactive(branchId):
+    branch = await Branch.get_or_none(id=branchId)
+    if branch:
+        branch.isActive = False
+        await branch.save()
+        return create_response(True, "Branch deleted successfully.", None, None), 200
+    return create_response(False, "An error occured unable to delete branch.", None, None), 200
+
+async def saveBranch(branchId, name):
+    if branchId == 0:
+        branch = await Branch.create(name=name, isActive=True)
+        
+        active_items = await Item.filter(isManaged=1)
+
+        branch_items = [
+            BranchItem(itemId=item.id, branchId=branch.id, quantity=Decimal(0.00)) 
+            for item in active_items
+        ]
+
+        await BranchItem.bulk_create(branch_items)
+
+        return create_response(True, "Branch saved successfully.", None, None), 200    
+    else:
+        branch = await Branch.get_or_none(id=branchId)
+        if branch:
+            branch.name = name
+            await branch.save()
+            return create_response(True, "Branch updated successfully.", None, None), 200
+        return create_response(False, "An error occurred, unable to update branch.", None, None), 200
+
+

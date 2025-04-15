@@ -15,21 +15,22 @@ async def get_products(categoryId, branchId, page=1, search=""):
                 SELECT 
                     i.id, 
                     i.name, 
-                    i.categoryId, 
+                    COALESCE(i.categoryId, 0) AS categoryId, 
                     i.price, 
                     i.cost, 
                     i.isManaged, 
                     i.imagePath, 
                     bi.quantity,
                     i.sellByUnit,
-                    COUNT(ti.itemId) AS total_sales
+                    COUNT(ti.itemId) AS total_sales,
+                    bi.id as branchItemId
                 FROM transactionitems ti
                 JOIN items i ON ti.itemId = i.id
-                JOIN transactions tr ON ti.transactionId = tr.id
+                JOIN transactions tr ON ti.transactionId = tr.id AND tr.isVoided = 0
                 JOIN branches b ON tr.branchId = b.id
                 JOIN branchitem bi ON bi.itemId = i.id AND bi.branchId = b.id
                 WHERE b.id = %s AND i.isManaged = 1
-                GROUP BY i.id, i.name, i.categoryId, i.price, i.cost, i.isManaged, i.imagePath, bi.quantity, i.sellByUnit
+                GROUP BY i.id, i.name, i.categoryId, i.price, i.cost, i.isManaged, i.imagePath, bi.quantity, i.sellByUnit, bi.id
             )
             SELECT * FROM HotItems 
             ORDER BY total_sales DESC 
@@ -40,13 +41,14 @@ async def get_products(categoryId, branchId, page=1, search=""):
             SELECT 
                 i.id, 
                 i.name, 
-                i.categoryId, 
+                COALESCE(i.categoryId, 0) AS categoryId, 
                 i.price, 
                 i.cost, 
                 i.isManaged, 
                 i.imagePath, 
                 bi.quantity,
-                i.sellByUnit
+                i.sellByUnit,
+                bi.id as branchItemId
             FROM items i
             LEFT JOIN branchitem bi ON i.id = bi.itemId
             WHERE bi.branchId = %s AND i.isManaged = 1
@@ -89,7 +91,8 @@ async def get_products(categoryId, branchId, page=1, search=""):
             "isManaged": item['isManaged'],
             "imagePath": item['imagePath'],
             "quantity": item['quantity'],
-            "sellByUnit": bool(item['sellByUnit'])
+            "sellByUnit": bool(item['sellByUnit']),
+            "branchItemId": item['branchItemId']
         }
         for item in items
     ]
@@ -102,7 +105,7 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
     offset = (page - 1) * pageSize
 
     sqlQuery = """
-        SELECT bi.id, i.name, bi.quantity, i.unitOfMeasure, i.criticalValue, i.sellByUnit, i.moq, wi.quantity as whQuantity, i.imagePath FROM items i 
+        SELECT bi.id, i.name, bi.quantity, i.unitOfMeasure, i.storeCriticalValue, i.sellByUnit, i.whCriticalValue, wi.quantity as whQuantity, i.imagePath FROM items i 
         INNER JOIN branchitem bi ON bi.itemId = i.id
         INNER JOIN warehouseitems wi ON wi.itemId = i.id
         WHERE bi.branchId = %s AND i.isManaged = 1
@@ -110,7 +113,7 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
     params = [branchId]
 
     if int(categoryId) == 1:
-        sqlQuery += " AND bi.quantity < i.criticalValue"
+        sqlQuery += " AND bi.quantity < i.storeCriticalValue"
 
     if search:
         sqlQuery += " AND i.name LIKE %s"
@@ -141,9 +144,9 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
             "name": item['name'],
             "quantity": item['quantity'],
             "unitOfMeasure": item['unitOfMeasure'],
-            "criticalValue": item['criticalValue'],
+            "whCriticalValue": item['whCriticalValue'],
             "sellByUnit": bool(item['sellByUnit']),
-            "moq": item['moq'],
+            "storeCriticalValue": item['storeCriticalValue'],
             "imagePath": item['imagePath'],
             "whQty": item['whQuantity']
         }
@@ -153,7 +156,7 @@ async def getBranchStocks(categoryId, branchId, page=1, search=""):
 
 async def getStockHistory(itemId):
     sqlQuery = """
-        SELECT s.*, i.moq from stockinputs s inner join branchitem bi on s.branchItemId= bi.id
+        SELECT s.*, i.storeCriticalValue from stockinputs s inner join branchitem bi on s.branchItemId= bi.id
         INNER JOIN items i on i.id = bi.itemId WHERE s.branchItemId = %s
     """
     params = [itemId]
@@ -175,7 +178,7 @@ async def getStockHistory(itemId):
         {
             "id": item['id'],
             "qty": item['qty'],
-            "moq": item['moq'],
+            "storeCriticalValue": item['storeCriticalValue'],
             "deliveryDate": item['deliveryDate'],
             "deliveredBy": item['deliveredBy'],
             "expectedTotalQty": item['expectedQty'],
@@ -201,12 +204,12 @@ async def getProductsHQ(categoryId, page=1, search=""):
             i.isManaged, 
             i.imagePath, 
             i.sellByUnit,
-            i.moq,
+            i.storeCriticalValue,
             c.name as categoryName,
-            i.criticalValue,
+            i.whCriticalValue,
             i.unitOfMeasure
         FROM items i
-        INNER JOIN categories c on c.Id = i.categoryId
+        LEFT JOIN categories c on c.Id = i.categoryId
         WHERE i.isManaged = 1
     """
 
@@ -246,9 +249,9 @@ async def getProductsHQ(categoryId, page=1, search=""):
             "isManaged": item['isManaged'],
             "imagePath": item['imagePath'],
             "sellByUnit": bool(item['sellByUnit']),
-            "moq": item['moq'],
+            "storeCriticalValue": item['storeCriticalValue'],
             "categoryName":item['categoryName'],
-            "criticalValue":item['criticalValue'],
+            "whCriticalValue":item['whCriticalValue'],
             "unitOfMeasure":item['unitOfMeasure']
         }
         for item in items
@@ -261,18 +264,18 @@ async def getProductHQ(itemId):
         SELECT 
             i.id, 
             i.name, 
-            i.categoryId, 
+            COALESCE(i.categoryId, 0) AS categoryId, 
             i.price, 
             i.cost, 
             i.isManaged, 
             i.imagePath, 
             i.sellByUnit,
-            i.moq,
+            i.storeCriticalValue,
             c.name as categoryName,
-            i.criticalValue,
+            i.whCriticalValue,
             i.unitOfMeasure
         FROM items i
-        INNER JOIN categories c ON c.Id = i.categoryId
+        LEFT JOIN categories c ON c.Id = i.categoryId
         WHERE i.id = %s
         LIMIT 1
     """
@@ -298,9 +301,9 @@ async def getProductHQ(itemId):
         "isManaged": item['isManaged'],
         "imagePath": item['imagePath'],
         "sellByUnit": bool(item['sellByUnit']),
-        "moq": item['moq'],
+        "storeCriticalValue": item['storeCriticalValue'],
         "categoryName": item['categoryName'],
-        "criticalValue": item['criticalValue'],
+        "whCriticalValue": item['whCriticalValue'],
         "unitOfMeasure": item['unitOfMeasure']
     }
 
@@ -333,15 +336,15 @@ async def saveItem(data, file):
     name = data.get('name')
     price = Decimal(data.get('price'))
     cost = Decimal(data.get('cost'))
-    categoryId = data.get('categoryId')
-    moq = data.get('moq')
+    categoryId = None if data.get('categoryId') == '0' else data.get('categoryId')
+    storeCriticalValue = data.get('storeCriticalValue')
     sellByUnit = data.get('sellByUnit')
     if sellByUnit == 'true':
         sellByUnit = True
     else:
         sellByUnit = False
 
-    criticalValue = data.get('criticalValue')
+    whCriticalValue = data.get('whCriticalValue')
     unitOfMeasure = data.get('unitOfMeasure')
 
     if itemId == 0:
@@ -349,12 +352,12 @@ async def saveItem(data, file):
             categoryId=categoryId,
             price=price,
             cost=cost,
-            moq= moq,
+            storeCriticalValue= storeCriticalValue,
             name = name,
             sellByUnit = sellByUnit,
             unitOfMeasure = unitOfMeasure,
             isManaged = True,
-            criticalValue = criticalValue
+            whCriticalValue = whCriticalValue
         )
         itemId = item.id
 
@@ -383,15 +386,16 @@ async def saveItem(data, file):
         existing_item.cost = cost
         existing_item.name = name
         existing_item.categoryId = categoryId
-        existing_item.moq = moq
+        existing_item.storeCriticalValue = storeCriticalValue
         existing_item.sellByUnit = sellByUnit
         existing_item.unitOfMeasure = unitOfMeasure
-        existing_item.criticalValue = criticalValue
+        existing_item.whCriticalValue = whCriticalValue
 
         cartItems = await CartItems.all()
 
         for i in cartItems:
-            if(i.itemId == existing_item.id):
+            branchItem = await BranchItem.get_or_none(id = i.branchItemId)
+            if(branchItem.itemId == existing_item.id):
                 await i.delete()
                 
         await existing_item.save()
@@ -423,21 +427,50 @@ async def getStocksMonitor(categoryId, page=1, search=""):
     pageSize = 30
     offset = (page - 1) * pageSize
 
-    sqlQuery = """
-            SELECT i.id, i.name, b1.quantity as ppQty, "Branch: PuP" as ppName, "Branch: BSN" as snName, "Branch: Lab" as lName, 
-                b2.quantity as snQty, b3.quantity as lQty, wh.quantity as whQty, "Warehouse" as whName,
-                i.sellByUnit, i.criticalValue, i.imagePath, i.moq, b1.Id as ppId, b2.Id as snId, b3.Id as lId, wh.Id as whId
-                FROM items i 
-                LEFT JOIN branchitem b1 on b1.itemId = i.id and b1.branchId = 1
-                LEFT JOIN branchitem b2 on b2.itemId = i.id and b2.branchId = 2
-                LEFT JOIN branchitem b3 on b3.itemId = i.id and b3.branchId = 3
-                LEFT JOIN warehouseitems wh on wh.itemId = i.id
-                WHERE i.isManaged = 1
+    connection = Tortoise.get_connection('default')
+    branches = await connection.execute_query("SELECT id, name FROM branches WHERE isActive = 1")
+    branch_list = branches[1]
+    
+    branch_joins = []
+    branch_selects = []
+    branch_names = []
+    branch_ids = []
+    critical_conditions = []
+    
+    for branch in branch_list:
+        alias = f"b{branch['id']}"
+        branch_joins.append(f"LEFT JOIN branchitem {alias} on {alias}.itemId = i.id and {alias}.branchId = {branch['id']}")
+        branch_selects.append(f"{alias}.quantity as branch_{branch['id']}_qty")
+        branch_names.append(f"'Branch: {branch['name']}' as branch_{branch['id']}_name")
+        branch_ids.append(f"{alias}.Id as branch_{branch['id']}_id")
+        critical_conditions.append(f"{alias}.quantity < i.storeCriticalValue")
+
+    sqlQuery = f"""
+        SELECT 
+            i.id, 
+            i.name, 
+            {', '.join(branch_selects)},
+            {', '.join(branch_names)},
+            wh.quantity as whQty, 
+            "Warehouse" as whName,
+            i.sellByUnit, 
+            i.whCriticalValue, 
+            i.imagePath, 
+            i.storeCriticalValue, 
+            {', '.join(branch_ids)},
+            wh.Id as whId,
+            i.unitOfMeasure
+        FROM items i 
+        {' '.join(branch_joins)}
+        LEFT JOIN warehouseitems wh on wh.itemId = i.id
+        WHERE i.isManaged = 1
     """
+    
     params = []
 
     if int(categoryId) == 1:
-        sqlQuery += " AND (b1.quantity < i.criticalValue OR b2.quantity < i.criticalValue OR b3.quantity < i.criticalValue OR wh.quantity < i.criticalValue)"
+        all_critical_conditions = " OR ".join(critical_conditions + ["wh.quantity < i.whCriticalValue"])
+        sqlQuery += f" AND ({all_critical_conditions})"
 
     if search:
         sqlQuery += " AND i.name LIKE %s"
@@ -447,45 +480,159 @@ async def getStocksMonitor(categoryId, page=1, search=""):
     sqlQuery += " LIMIT %s OFFSET %s"
     params.extend([pageSize, offset])
 
-    connection = Tortoise.get_connection('default')
     result = await connection.execute_query(sqlQuery, tuple(params))
 
-    countQuery = """
-                SELECT COUNT(*) 
-                FROM items i 
-                LEFT JOIN branchitem b1 on b1.itemId = i.id and b1.branchId = 1
-                LEFT JOIN branchitem b2 on b2.itemId = i.id and b2.branchId = 2
-                LEFT JOIN branchitem b3 on b3.itemId = i.id and b3.branchId = 3
-                LEFT JOIN warehouseitems wh on wh.itemId = i.id
-                WHERE i.isManaged = 1
+    countQuery = f"""
+        SELECT COUNT(*) 
+        FROM items i 
+        {' '.join(branch_joins)}
+        LEFT JOIN warehouseitems wh on wh.itemId = i.id
+        WHERE i.isManaged = 1
     """
-    totalCountResult = await connection.execute_query(countQuery)
+    
+    if int(categoryId) == 1:
+        countQuery += f" AND ({all_critical_conditions})"
+    
+    if search:
+        countQuery += " AND i.name LIKE %s"
+    
+    totalCountResult = await connection.execute_query(countQuery, tuple(params[:-2]))
     totalCount = totalCountResult[1][0]['COUNT(*)']
 
     items = result[1]
-
-    itemList = [
-        {
+    itemList = []
+    
+    for item in items:
+        item_data = {
             "id": item['id'],
             "name": item['name'],
-            "ppQty": Decimal(item['ppQty']),
-            "ppName": item['ppName'],
-            "snName": item['snName'],
-            "lName": item['lName'],
-            "snQty": Decimal(item['snQty']),
-            "lQty": Decimal(item['lQty']),
             "whQty": Decimal(item['whQty']),
             "whName": item['whName'],
-            "criticalValue": item['criticalValue'],
+            "whCriticalValue": item['whCriticalValue'],
             "sellByUnit": bool(item['sellByUnit']),
-            "imagePath" : item['imagePath'],
-            "moq": item['moq'],
-            "ppId": item['ppId'],
-            "snId": item['snId'],
-            "lId": item['lId'],
-            "whId": item['whId']
+            "imagePath": item['imagePath'],
+            "storeCriticalValue": item['storeCriticalValue'],
+            "whId": item['whId'],
+            "unitOfMeasure": item['unitOfMeasure'],
+            "branches": []
         }
-        for item in items
-    ]
+        
+        for branch in branch_list:
+            branch_id = branch['id']
+            item_data["branches"].append({
+                "id": item[f'branch_{branch_id}_id'],
+                "name": item[f'branch_{branch_id}_name'],
+                "quantity": Decimal(item[f'branch_{branch_id}_qty']),
+                "branchId": branch_id
+            })
+        
+        itemList.append(item_data)
 
     return create_response(True, 'Items Successfully Retrieved', itemList, None, totalCount), 200
+
+async def getWHStocksMonitor(categoryId, page=1, search=""):
+    pageSize = 30
+    offset = (page - 1) * pageSize
+
+    connection = Tortoise.get_connection('default')
+    branches = await connection.execute_query("SELECT id, name FROM branches WHERE isActive = 1")
+    branch_list = branches[1]
+    
+    branch_joins = []
+    branch_selects = []
+    branch_ids = []
+    critical_conditions = []
+    
+    for branch in branch_list:
+        alias = f"b{branch['id']}"
+        branch_joins.append(f"LEFT JOIN branchitem {alias} on {alias}.itemId = i.id and {alias}.branchId = {branch['id']}")
+        branch_selects.append(f"{alias}.quantity as branch_{branch['id']}_qty")
+        branch_selects.append(f"b{branch['id']}.branchId as branch_{branch['id']}_id")
+        branch_ids.append(f"{alias}.Id as branch_{branch['id']}_item_id")
+        critical_conditions.append(f"{alias}.quantity < i.storeCriticalValue")
+
+    sqlQuery = f"""
+        SELECT 
+            i.id, 
+            i.name, 
+            {', '.join(branch_selects)},
+            {', '.join(branch_ids)},
+            i.sellByUnit, 
+            i.imagePath, 
+            i.storeCriticalValue,
+            i.unitOfMeasure
+        FROM items i 
+        {' '.join(branch_joins)}
+        WHERE i.isManaged = 1
+    """
+    
+    params = []
+
+    if int(categoryId) == 1:
+        all_critical_conditions = " OR ".join(critical_conditions)
+        sqlQuery += f" AND ({all_critical_conditions})"
+
+    if search:
+        sqlQuery += " AND i.name LIKE %s"
+        params.append(f'%{search}%')
+
+    sqlQuery += " ORDER BY i.name"
+    sqlQuery += " LIMIT %s OFFSET %s"
+    params.extend([pageSize, offset])
+
+    result = await connection.execute_query(sqlQuery, tuple(params))
+
+    countQuery = f"""
+        SELECT COUNT(*) 
+        FROM items i 
+        {' '.join(branch_joins)}
+        WHERE i.isManaged = 1
+    """
+    
+    if int(categoryId) == 1:
+        countQuery += f" AND ({all_critical_conditions})"
+    
+    if search:
+        countQuery += " AND i.name LIKE %s"
+    
+    totalCountResult = await connection.execute_query(countQuery, tuple(params[:-2]))
+    totalCount = totalCountResult[1][0]['COUNT(*)']
+
+    items = result[1]
+    itemList = []
+    
+    branch_name_map = {branch['id']: branch['name'] for branch in branch_list}
+    
+    for item in items:
+        item_data = {
+            "id": item['id'],
+            "name": item['name'],
+            "sellByUnit": bool(item['sellByUnit']),
+            "imagePath": item['imagePath'],
+            "storeCriticalValue": item['storeCriticalValue'],
+            "unitOfMeasure": item['unitOfMeasure'],
+            "branches": []
+        }
+        
+        for branch in branch_list:
+            branch_id = branch['id']
+            item_data["branches"].append({
+                "id": item[f'branch_{branch_id}_item_id'],
+                "branchId": branch_id,
+                "name": branch_name_map[branch_id],
+                "quantity": Decimal(item[f'branch_{branch_id}_qty']) if item[f'branch_{branch_id}_qty'] is not None else Decimal(0)
+            })
+        
+        itemList.append(item_data)
+
+    return create_response(True, 'Items Successfully Retrieved', itemList, None, totalCount), 200
+
+async def editStock(id, qty):
+    branchItem = await BranchItem.get_or_none(id=id)
+    if not branchItem:
+        return create_response(False, 'Item not found', None, None), 200
+
+    branchItem.quantity = Decimal(str(qty))
+    await branchItem.save()
+    
+    return create_response(True, "Success", None, None), 200
