@@ -6,7 +6,6 @@ import hashlib
 import re
 import cloudinary
 import cloudinary.uploader
-import cloudinary.api
 
 cloudinary.config( 
     cloud_name = CLOUD_NAME, 

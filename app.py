@@ -8,6 +8,8 @@ import customerService
 import fileService
 import socketService
 import warehouseService
+import stockService
+import centralService
 from db import DATABASE_CONFIG
 import asyncio
 import uvicorn
@@ -63,14 +65,6 @@ async def getCustomerList():
 async def getCustomer():
     id = request.args.get('id')
     response = await customerService.getCustomer(int(id)) 
-    return response
-
-@app.route('/addItemToCart', methods=['POST'])
-@token_required
-async def addItemToCart():
-    data = await request.json
-    
-    response = await transactionService.addItemToCart(int(request.cart_id), int(data.get('itemId')), data.get('quantity')) 
     return response
 
 @app.route('/getCart', methods=['GET'])
@@ -180,6 +174,15 @@ async def getStocksMonitor():
     response = await itemService.getStocksMonitor(int(categoryId), int(page), search) 
     return response
 
+@app.route('/getWHStocksMonitor', methods=['GET'])
+@token_required
+async def getWHStocksMonitor():
+    categoryId = request.args.get('categoryId')
+    page = request.args.get('page')
+    search = request.args.get('search')
+    response = await itemService.getWHStocksMonitor(int(categoryId), int(page), search) 
+    return response
+
 @app.route('/getTransactionHistory', methods=['GET'])
 @token_required
 async def getTransactionHistory():
@@ -219,6 +222,16 @@ async def getAllTransactionsAsync():
     response = await transactionService.getAllTransactionsAsync(int(branchId), int(page), search) 
     return response
 
+@app.route('/getAllCentralTransactions', methods=['GET'])
+@token_required
+async def getAllCentralTransactionsAsync():
+    page = request.args.get('page')
+    search = request.args.get('search')
+    categoryId = request.args.get('categoryId')
+
+    response = await centralService.getAllCentralTransactionsAsync(categoryId, int(page), search) 
+    return response
+
 @app.route('/getAllTransactionsHQ', methods=['GET'])
 @token_required
 async def getAllTransactionsAsyncHQ():
@@ -240,6 +253,69 @@ async def getSupplierList():
 async def getSupplier():  
     id = request.args.get('id')
     response = await warehouseService.getSupplier(int(id)) 
+    return response
+
+@app.route('/getBranchTransferHistory', methods=['GET'])
+@token_required
+async def getBranchTransferHistory():  
+    id = request.args.get('branchItemId')
+    response = await stockService.getBranchTransferHistory(int(id)) 
+    return response
+
+@app.route('/getReturnToStockHistory', methods=['GET'])
+@token_required
+async def getReturnToStockHistory():  
+    id = request.args.get('whItemId')
+    response = await warehouseService.getReturnToStockHistory(int(id)) 
+    return response
+
+@app.route('/getBranchReturnHistory', methods=['GET'])
+@token_required
+async def getBranchReturnHistory():  
+    id = request.args.get('branchItemId')
+    response = await stockService.getBranchReturnHistory(int(id)) 
+    return response
+
+@app.route('/getLoyaltyCardList', methods=['GET'])
+@token_required
+async def getLoyaltyCardList():  
+    response = await customerService.getLoyaltyCardList() 
+    return response
+
+@app.route('/getLoyaltyStages', methods=['GET'])
+@token_required
+async def getLoyaltyStages():  
+    cardId = request.args.get('cardId')
+    response = await customerService.getLoyaltyStages(cardId) 
+    return response
+
+@app.route('/getRewards', methods=['GET'])
+@token_required
+async def getRewards():  
+    response = await customerService.getRewards() 
+    return response
+
+@app.route('/getCustomerLoyalty', methods=['GET'])
+@token_required
+async def getCustomerLoyalty(): 
+    customerId = request.args.get('customerId') 
+    response = await customerService.getCustomerLoyalty(customerId) 
+    return response
+
+@app.route('/getCentralProducts', methods=['GET'])
+@token_required
+async def getCentralProducts(): 
+    categoryId = request.args.get('categoryId')
+    page = request.args.get('page')
+    search = request.args.get('search')
+    response = await centralService.getCentralProducts(int(categoryId), int(page), search) 
+    return response
+
+@app.route('/getOldestTransaction', methods=['GET'])
+@token_required
+async def getOldestTransaction(): 
+    branchId = request.args.get('branchId')
+    response = await transactionService.getOldestTransaction(int(branchId)) 
     return response
 
 """ POST AND PUT METHODS """
@@ -309,6 +385,15 @@ async def processPayment():
     response = await transactionService.processPayment(int(request.cart_id), float(amountReceived)) 
     return response
 
+@app.route('/processCentralPayment', methods=['POST'])
+@token_required
+async def processCentralPayment():
+    data = await request.json
+    amountReceived = data.get('amountReceived')
+    isCredit = data.get('isCredit')
+    response = await centralService.processCentralPayment(int(request.cart_id), float(amountReceived), bool(isCredit)) 
+    return response
+
 @app.route('/updateCustomer', methods=['PUT'])
 @token_required
 async def updateCustomer():
@@ -325,6 +410,18 @@ async def generate_pdf():
     transactionId = data.get('transactionId')
 
     pdf_buffer = await fileService.generateReceipt(transactionId) 
+
+    return await send_file(pdf_buffer, as_attachment=True, mimetype='application/pdf')  
+
+@app.route('/generateSalespdf', methods=['POST'])
+@token_required
+async def generateSalespdf():
+    data = await request.json
+    fromDate = data.get('fromDate')
+    toDate = data.get('toDate')
+    branchId = data.get('branchId')
+
+    pdf_buffer = await fileService.generateSalesReport(fromDate,toDate, int(branchId)) 
 
     return await send_file(pdf_buffer, as_attachment=True, mimetype='application/pdf')  
 
@@ -418,6 +515,160 @@ async def removeSupplier():
     response = await warehouseService.removeSupplier(id) 
     return response
 
+@app.route('/editStock', methods=['PUT'])
+@token_required
+async def editStock():
+    data = await request.json
+    id = data.get('id')
+    qty = data.get('qty')
+    response = await itemService.editStock(int(id), qty) 
+    return response
+
+@app.route('/editWHStock', methods=['PUT'])
+@token_required
+async def editWHStock():
+    data = await request.json
+    id = data.get('id')
+    qty = data.get('qty')
+    response = await warehouseService.editWHStock(int(id), qty) 
+    return response
+
+@app.route('/voidTransaction', methods=['PUT'])
+@token_required
+async def voidTransaction():
+    data = await request.json
+    id = data.get('id')
+    response = await transactionService.voidTransaction(int(id)) 
+    return response
+
+@app.route('/saveBranchTransfer', methods=['POST'])
+@token_required
+async def saveBranchTransfer():
+    data = await request.json
+    branchTransfer = data.get('branchTransfer')
+    response = await stockService.saveBranchTransfer(branchTransfer) 
+    return response
+
+@app.route('/returnToSupplier', methods=['POST'])
+@token_required
+async def returnToSupplier():
+    data = await request.json
+    returnStock = data.get('returnStock')
+    response = await warehouseService.returnToSupplier(returnStock) 
+    return response
+
+@app.route('/returnToWH', methods=['POST'])
+@token_required
+async def returnToWH():
+    data = await request.json
+    returnStock = data.get('returnStock')
+    response = await stockService.returnToWH(returnStock) 
+    return response
+
+@app.route('/setBranchInactive', methods=['PUT'])
+@token_required
+async def setBranchInactive():
+    data = await request.json
+    id = data.get('id')
+    response = await userService.setBranchInactive(id) 
+    return response
+
+@app.route('/saveBranch', methods=['PUT'])
+@token_required
+async def saveBranch():
+    data = await request.json
+    id = data.get('id')
+    name = data.get('name') 
+    response = await userService.saveBranch(id, name) 
+    return response
+
+@app.route('/saveItemsReward', methods=['PUT'])
+@token_required
+async def saveItemsReward():
+    data = await request.json
+    id = data.get('id')
+    name = data.get('name') 
+    response = await customerService.saveItemsReward(id, name) 
+    return response
+
+@app.route('/saveLoyaltyCard', methods=['PUT'])
+@token_required
+async def saveLoyaltyCard():
+    data = await request.json
+    card = data.get('card')
+    response = await customerService.saveLoyaltyCard(card) 
+    return response
+
+@app.route('/saveLoyaltyStage', methods=['PUT'])
+@token_required
+async def saveLoyaltyStage():
+    data = await request.json
+    stage = data.get('stage')
+    response = await customerService.saveLoyaltyStage(stage) 
+    return response
+
+@app.route('/saveLoyaltyCustomer', methods=['PUT'])
+@token_required
+async def saveLoyaltyCustomer():
+    data = await request.json
+    customerId = data.get('customerId')
+    response = await customerService.saveLoyaltyCustomer(customerId) 
+    return response
+
+@app.route('/markStageDone', methods=['PUT'])
+@token_required
+async def markStageDone():
+    data = await request.json
+    loyaltyCustomerId = data.get('loyaltyCustomerId')
+    itemId = data.get('itemId')
+    response = await customerService.markStageDone(loyaltyCustomerId, itemId) 
+    return response
+
+@app.route('/saveCustomerItemReward', methods=['PUT'])
+@token_required
+async def saveCustomerItemReward():
+    data = await request.json
+    id = data.get('id')
+    itemId = data.get('itemId') 
+    branchId = data.get('branchId')
+    qty = data.get('qty')
+    response = await customerService.saveCustomerItemReward(id, itemId, branchId, qty) 
+    return response
+
+@app.route('/changeReward', methods=['PUT'])
+@token_required
+async def changeReward():
+    data = await request.json
+    id = data.get('id')
+    itemId = data.get('itemId') 
+    branchId = data.get('branchId')
+    lastItemId = data.get('lastItemId')
+    qty = data.get('qty')
+    lastQty = data.get('lastQty')
+    response = await customerService.changeReward(id, itemId, branchId, lastItemId, qty, lastQty) 
+    return response
+
+@app.route('/addItemToCart', methods=['POST'])
+@token_required
+async def addItemToCart():
+    data = await request.json
+    response = await transactionService.addItemToCart(int(request.cart_id), int(data.get('itemId')), data.get('quantity')) 
+    return response
+
+@app.route('/addCentralItemToCart', methods=['POST'])
+@token_required
+async def addCentralItemToCart():
+    data = await request.json
+    response = await centralService.addCentralItemToCart(int(request.cart_id), data.get('branchProducts')) 
+    return response
+
+@app.route('/payPendingTransaction', methods=['PUT'])
+@token_required
+async def payPendingTransaction():
+    data = await request.json
+    response = await centralService.payPendingTransaction(data.get('transactionId'), data.get('amount')) 
+    return response
+
 """ SOCKET METHODS """
 
 @app.websocket('/ws/criticalItems')
@@ -430,10 +681,18 @@ async def dailyTransaction():
     branch_id = websocket.args.get('branchId')
     await socketService.dailyTransaction(websocket, branch_id)
 
+@app.websocket('/ws/dailyTransactionExacon')
+async def dailyTransactionExacon():
+    await socketService.dailyTransactionExacon(websocket)
+
 @app.websocket('/ws/totalSales')
 async def totalSales():
     branch_id = websocket.args.get('branchId')
     await socketService.totalSales(websocket, branch_id)
+
+@app.websocket('/ws/totalCentralSales')
+async def totalCentralSales():
+    await socketService.totalCentralSales(websocket)
 
 @app.websocket('/ws/dailyTransactionHQ')
 async def dailyTransactionHQ():
@@ -446,6 +705,10 @@ async def totalSalesHQ():
 @app.websocket('/ws/criticalItemsHQ')
 async def critical_items_ws_HQ():
     await socketService.criticalItemsHQ(websocket)
+
+@app.websocket('/ws/criticalItemsBranches')
+async def critical_items_ws_Branches():
+    await socketService.criticalItemsBranches(websocket)
 
 @app.websocket('/ws/criticalItemsWH')
 async def critical_items_ws_WH():
@@ -463,7 +726,17 @@ async def analysisReport():
 
 @app.websocket('/ws/analyticsDataHQ')
 async def analyticsDataHQ():
-    await socketService.analyticsDataHQ(websocket)
+    fromDate = websocket.args.get('fromDate')
+    toDate = websocket.args.get('toDate')
+    branchId = websocket.args.get('branchId')
+    await socketService.analyticsDataHQ(websocket,fromDate, toDate, branchId)
+
+@app.websocket('/ws/analyticsGrossSalesDataHQ')
+async def analyticsGrossSalesDataHQ():
+    fromDate = websocket.args.get('fromDate')
+    toDate = websocket.args.get('toDate')
+    branchId = websocket.args.get('branchId')
+    await socketService.analyticsGrossSalesDataHQ(websocket,fromDate, toDate, branchId)
 
 @app.websocket('/ws/analysisReportHQ')
 async def analysisReportHQ():

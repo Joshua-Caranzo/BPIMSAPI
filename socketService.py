@@ -9,7 +9,7 @@ async def criticalItems(websocket, branchId):
             SELECT COUNT(*) as critical_count
             FROM branchitem bi
             INNER JOIN items i ON i.id = bi.itemid
-            WHERE i.criticalValue > bi.quantity
+            WHERE i.storeCriticalValue > bi.quantity
             AND bi.branchId = {branchId} AND i.isManaged = 1
         """
         connection = Tortoise.get_connection('default')
@@ -60,6 +60,7 @@ async def dailyTransaction(websocket, branchId):
                 WHERE DATE(tr.transactionDate) = '{singapore_date}'
                 AND TIME(tr.transactionDate) BETWEEN '{period["start"]}' AND '{period["end"]}'
                 AND tr.branchId = {branchId}
+                AND tr.isVoided = 0
                 ORDER BY tr.transactionDate;
             """
             
@@ -79,6 +80,7 @@ async def dailyTransaction(websocket, branchId):
             INNER JOIN users u ON u.id = tr.cashierId
             WHERE DATE(tr.transactionDate) = '{singapore_date}'
             AND tr.branchId = {branchId}
+            AND tr.isVoided = 0
             ORDER BY tr.transactionDate;
         """
         
@@ -125,7 +127,7 @@ async def totalSales(websocket, branchId):
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
             WHERE YEAR(transactionDate) = {singapore_year}
-            AND branchId = {branchId}
+            AND branchId = {branchId} AND isVoided = 0
         """
         totalSalesPerYear = await connection.execute_query_dict(totalSalesYearQuery)
 
@@ -133,7 +135,7 @@ async def totalSales(websocket, branchId):
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
             WHERE YEAR(transactionDate) = {singapore_year} AND MONTH(transactionDate) = {singapore_month}
-            AND branchId = {branchId}
+            AND branchId = {branchId} AND isVoided = 0
         """
         totalSalesPerMonth = await connection.execute_query_dict(totalSalesMonthQuery)
 
@@ -165,6 +167,8 @@ async def dailyTransactionHQ(websocket):
             LEFT JOIN transactions tr 
                 ON tr.branchId = b.Id 
                 AND DATE(tr.transactionDate) = '{singapore_date}'
+                AND tr.isVoided = 0
+            WHERE b.isActive = 1
             GROUP BY b.id;
         """
 
@@ -181,7 +185,8 @@ async def dailyTransactionHQ(websocket):
             JOIN items i ON ti.itemId = i.id
             JOIN transactions tr ON ti.transactionId = tr.id
             JOIN branches b ON tr.branchId = b.id
-            WHERE DATE(tr.transactionDate) = '{singapore_date}'
+            WHERE DATE(tr.transactionDate) = '{singapore_date}' AND tr.isVoided = 0
+            AND b.isActive = 1
             GROUP BY b.id, i.id
         )
         SELECT branchName, itemName, totalSales
@@ -233,7 +238,7 @@ async def totalSalesHQ(websocket):
         totalSalesYearQuery = f"""
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
-            WHERE YEAR(transactionDate) = {singapore_year}
+            WHERE YEAR(transactionDate) = {singapore_year} AND isVoided = 0
         """
         totalSalesPerYear = await connection.execute_query_dict(totalSalesYearQuery)
 
@@ -241,7 +246,7 @@ async def totalSalesHQ(websocket):
             SELECT SUM(totalAmount) AS totalSales
             FROM transactions
             WHERE YEAR(transactionDate) = {singapore_year} 
-            AND MONTH(transactionDate) = {singapore_month}
+            AND MONTH(transactionDate) = {singapore_month} AND isVoided = 0
         """
         totalSalesPerMonth = await connection.execute_query_dict(totalSalesMonthQuery)
 
@@ -257,13 +262,33 @@ async def totalSalesHQ(websocket):
 
         await asyncio.sleep(1)
 
+async def criticalItemsBranches(websocket):
+    while True:
+        count_query = f"""
+            SELECT COUNT(*) as critical_count
+            FROM branchitem bi
+            INNER JOIN items i ON i.id = bi.itemid
+            INNER JOIN branches b on b.id = bi.branchId
+            WHERE i.storeCriticalValue > bi.quantity AND b.isActive = 1
+            AND i.isManaged = 1
+        """
+        connection = Tortoise.get_connection('default')
+        result = await connection.execute_query_dict(count_query)
+
+        bi_critical_count = result[0]['critical_count']
+
+        await websocket.send(str(bi_critical_count)) 
+
+        await asyncio.sleep(5)
+
 async def criticalItemsHQ(websocket):
     while True:
         count_query = f"""
             SELECT COUNT(*) as critical_count
             FROM branchitem bi
             INNER JOIN items i ON i.id = bi.itemid
-            WHERE i.criticalValue > bi.quantity
+            INNER JOIN branches b on b.id = bi.branchId
+            WHERE i.storeCriticalValue > bi.quantity AND b.isActive = 1
             AND i.isManaged = 1
         """
         connection = Tortoise.get_connection('default')
@@ -275,7 +300,7 @@ async def criticalItemsHQ(websocket):
             SELECT COUNT(*) as critical_count
             FROM warehouseitems bi
             INNER JOIN items i ON i.id = bi.itemid
-            WHERE i.criticalValue > bi.quantity
+            WHERE i.whCriticalValue > bi.quantity
             AND i.isManaged = 1
         """
         connection = Tortoise.get_connection('default')
@@ -293,7 +318,7 @@ async def criticalItemsWH(websocket):
             SELECT COUNT(*) as critical_count
             FROM warehouseitems bi
             INNER JOIN items i ON i.id = bi.itemid
-            WHERE i.criticalValue > bi.quantity
+            WHERE i.whCriticalValue > bi.quantity
             AND i.isManaged = 1
         """
         connection = Tortoise.get_connection('default')
@@ -314,21 +339,21 @@ async def analyticsData(websocket, branch_id=1):
 
         queries = {
             "Week": f"""
-                SELECT 
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 0 THEN tr.totalAmount END), 0) AS Monday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 1 THEN tr.totalAmount END), 0) AS Tuesday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 2 THEN tr.totalAmount END), 0) AS Wednesday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 3 THEN tr.totalAmount END), 0) AS Thursday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 4 THEN tr.totalAmount END), 0) AS Friday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 5 THEN tr.totalAmount END), 0) AS Saturday
-                FROM transactions tr
-                INNER JOIN users u ON u.id = tr.cashierId
-                WHERE DATE(tr.transactionDate) BETWEEN 
-                    DATE_SUB('{singapore_date}', INTERVAL WEEKDAY('{singapore_date}') DAY) 
-                    AND 
-                    DATE_SUB('{singapore_date}', INTERVAL WEEKDAY('{singapore_date}') - 5 DAY)
-                AND tr.branchId = {branch_id};
-            """,
+                    SELECT 
+                        COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 6 THEN tr.totalAmount END), 0) AS Sunday,
+                        COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 0 THEN tr.totalAmount END), 0) AS Monday,
+                        COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 1 THEN tr.totalAmount END), 0) AS Tuesday,
+                        COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 2 THEN tr.totalAmount END), 0) AS Wednesday,
+                        COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 3 THEN tr.totalAmount END), 0) AS Thursday,
+                        COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 4 THEN tr.totalAmount END), 0) AS Friday
+                    FROM transactions tr
+                    INNER JOIN users u ON u.id = tr.cashierId
+                    WHERE DATE(tr.transactionDate) BETWEEN 
+                        DATE_SUB('{singapore_date}', INTERVAL WEEKDAY('{singapore_date}') + 1 DAY) 
+                        AND 
+                        DATE_SUB('{singapore_date}', INTERVAL WEEKDAY('{singapore_date}') - 4 DAY)
+                    AND tr.branchId = {branch_id} AND tr.isVoided = 0
+                """,
             "Month": f"""
                 SELECT 
                     COALESCE(SUM(CASE WHEN tr.transactionDate BETWEEN DATE_FORMAT('{singapore_date}', '%Y-%m-01') 
@@ -340,7 +365,7 @@ async def analyticsData(websocket, branch_id=1):
                     COALESCE(SUM(CASE WHEN tr.transactionDate BETWEEN DATE_ADD(DATE_FORMAT('{singapore_date}', '%Y-%m-01'), INTERVAL 21 DAY) 
                                       AND LAST_DAY('{singapore_date}') THEN tr.totalAmount END), 0) AS Week_4
                 FROM transactions tr
-                WHERE MONTH(tr.transactionDate) = {singapore_month} AND YEAR(tr.transactionDate) = {singapore_year} AND tr.branchId = {branch_id};
+                WHERE MONTH(tr.transactionDate) = {singapore_month} AND YEAR(tr.transactionDate) = {singapore_year} AND tr.branchId = {branch_id} AND tr.IsVoided = 0
             """,
             "Year": f"""
                 SELECT 
@@ -359,7 +384,7 @@ async def analyticsData(websocket, branch_id=1):
                 FROM transactions tr
                 INNER JOIN users u ON u.id = tr.cashierId
                 WHERE YEAR(tr.transactionDate) = {singapore_year} 
-                AND tr.branchId = {branch_id}
+                AND tr.branchId = {branch_id} AND tr.isVoided = 0
             """,
             "All": f"""
                 WITH RECURSIVE MonthSeries AS (
@@ -377,7 +402,7 @@ async def analyticsData(websocket, branch_id=1):
                 FROM MonthSeries ms
                 LEFT JOIN transactions tr 
                     ON DATE_FORMAT(tr.transactionDate, '%Y-%m') = DATE_FORMAT(ms.monthStart, '%Y-%m')
-                    AND tr.branchId = {branch_id}
+                    AND tr.branchId = {branch_id} AND tr.isVoided = 0
                 GROUP BY ms.monthStart, YearMonth  
                 ORDER BY ms.monthStart;
             """
@@ -387,8 +412,13 @@ async def analyticsData(websocket, branch_id=1):
         for filter_type, query in queries.items():
             result = await connection.execute_query_dict(query)
             if filter_type == "All":
-                sales_data[filter_type] = [
-                    {"label": row["YearMonth"], "value": float(row["TotalAmount"]), "dataPointText": f"₱{float(row['TotalAmount']):,.2f}"} for row in result
+                sales_data["All"] = [
+                    {
+                        "label": row["YearMonth"],
+                        "value": float(row["TotalAmount"]) if row["TotalAmount"] is not None else 0.0,  
+                        "dataPointText": f"₱{float(row['TotalAmount'] or 0):,.2f}"  
+                    }
+                    for row in result
                 ]
             else:
                 sales_data[filter_type] = [
@@ -408,53 +438,35 @@ async def analysisReport(websocket, branchId):
         percentQuery = f"""
             SELECT 
                 CASE 
-                    WHEN 
-                        COUNT(DISTINCT CASE 
-                            WHEN MONTH(transactionDate) <> {singapore_month} 
-                            AND YEAR(transactionDate) <> {singapore_year} 
-                            THEN DATE_FORMAT(transactionDate, '%Y-%m') 
-                        END) > 0
-                        AND 
-                        SUM(CASE 
-                            WHEN MONTH(transactionDate) <> {singapore_month} 
-                            AND YEAR(transactionDate) <> {singapore_year} 
-                            THEN totalAmount 
-                        END) > 0 
-                    THEN 
-                        CAST((( 
-                            SUM(CASE 
-                                WHEN MONTH(transactionDate) = {singapore_month} 
+                    WHEN SUM(CASE WHEN MONTH(transactionDate) = {singapore_month} 
                                 AND YEAR(transactionDate) = {singapore_year} 
-                                THEN totalAmount 
-                            END) - 
-                            (SUM(CASE 
-                                WHEN MONTH(transactionDate) <> {singapore_month} 
-                                AND YEAR(transactionDate) <> {singapore_year} 
-                                THEN totalAmount 
-                            END) / 
-                            COUNT(DISTINCT CASE 
-                                WHEN MONTH(transactionDate) <> {singapore_month} 
-                                AND YEAR(transactionDate) <> {singapore_year} 
-                                THEN DATE_FORMAT(transactionDate, '%Y-%m') 
-                            END))
-                        ) 
-                        / 
-                        (SUM(CASE 
-                            WHEN MONTH(transactionDate) <> {singapore_month} 
-                            AND YEAR(transactionDate) <> {singapore_year} 
-                            THEN totalAmount 
-                        END) / 
-                        COUNT(DISTINCT CASE 
-                            WHEN MONTH(transactionDate) <> {singapore_month} 
-                            AND YEAR(transactionDate) <> {singapore_year} 
-                            THEN DATE_FORMAT(transactionDate, '%Y-%m') 
-                        END))
-                    ) * 100 AS DOUBLE)
+                            THEN totalAmount END) IS NOT NULL
+                        AND SUM(CASE WHEN MONTH(transactionDate) = {singapore_month} - 1 
+                                    AND YEAR(transactionDate) = {singapore_year} 
+                                THEN totalAmount END) IS NOT NULL
+                    THEN 
+                        CAST(
+                            (
+                                (
+                                    SUM(CASE WHEN MONTH(transactionDate) = {singapore_month} 
+                                            AND YEAR(transactionDate) = {singapore_year} 
+                                        THEN totalAmount END) 
+                                    - 
+                                    SUM(CASE WHEN MONTH(transactionDate) = {singapore_month} - 1 
+                                            AND YEAR(transactionDate) = {singapore_year} 
+                                        THEN totalAmount END)
+                                )
+                                / 
+                                SUM(CASE WHEN MONTH(transactionDate) = {singapore_month} - 1 
+                                        AND YEAR(transactionDate) = {singapore_year} 
+                                    THEN totalAmount END)
+                            ) * 100 AS DOUBLE
+                        )
                     ELSE 0.0 
                 END AS percentageChange
             FROM transactions
             INNER JOIN branches b ON b.Id = transactions.branchId
-            WHERE b.id = {branchId};
+            WHERE b.id = {branchId} AND transactions.isVoided = 0
         """
 
         percentage = await connection.execute_query_dict(percentQuery)
@@ -513,7 +525,7 @@ async def analysisReport(websocket, branchId):
                 END AS highOrderPercentage
             FROM transactions
             INNER JOIN branches b ON b.Id = transactions.branchId
-            WHERE b.id = {branchId}
+            WHERE b.id = {branchId} AND transactions.isVoided = 0
         """
         highSmallValue = await connection.execute_query_dict(highSmallQuery)
 
@@ -550,96 +562,82 @@ async def analysisReport(websocket, branchId):
         await websocket.send_json(response)
         await asyncio.sleep(1)
 
-async def analyticsDataHQ(websocket):
+async def analyticsDataHQ(websocket, from_date_str, to_date_str, branch_id):
     while True:
         now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
         connection = Tortoise.get_connection('default')
-        singapore_year = now_sg.year
-        singapore_month = now_sg.month
-        singapore_date = now_sg.date()
-
-        queries = {
-            "Week": f"""
-                SELECT 
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 0 THEN tr.totalAmount END), 0) AS Monday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 1 THEN tr.totalAmount END), 0) AS Tuesday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 2 THEN tr.totalAmount END), 0) AS Wednesday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 3 THEN tr.totalAmount END), 0) AS Thursday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 4 THEN tr.totalAmount END), 0) AS Friday,
-                    COALESCE(SUM(CASE WHEN WEEKDAY(tr.transactionDate) = 5 THEN tr.totalAmount END), 0) AS Saturday
-                FROM transactions tr
-                INNER JOIN users u ON u.id = tr.cashierId
-                WHERE DATE(tr.transactionDate) BETWEEN 
-                    DATE_SUB('{singapore_date}', INTERVAL WEEKDAY('{singapore_date}') DAY) 
-                    AND 
-                    DATE_SUB('{singapore_date}', INTERVAL WEEKDAY('{singapore_date}') - 5 DAY)
-            """,
-            "Month": f"""
-                SELECT 
-                    COALESCE(SUM(CASE WHEN tr.transactionDate BETWEEN DATE_FORMAT('{singapore_date}', '%Y-%m-01') 
-                                      AND DATE_ADD(DATE_FORMAT('{singapore_date}', '%Y-%m-01'), INTERVAL 6 DAY) THEN tr.totalAmount END), 0) AS Week_1,
-                    COALESCE(SUM(CASE WHEN tr.transactionDate BETWEEN DATE_ADD(DATE_FORMAT('{singapore_date}', '%Y-%m-01'), INTERVAL 7 DAY) 
-                                      AND DATE_ADD(DATE_FORMAT('{singapore_date}', '%Y-%m-01'), INTERVAL 13 DAY) THEN tr.totalAmount END), 0) AS Week_2,
-                    COALESCE(SUM(CASE WHEN tr.transactionDate BETWEEN DATE_ADD(DATE_FORMAT('{singapore_date}', '%Y-%m-01'), INTERVAL 14 DAY) 
-                                      AND DATE_ADD(DATE_FORMAT('{singapore_date}', '%Y-%m-01'), INTERVAL 20 DAY) THEN tr.totalAmount END), 0) AS Week_3,
-                    COALESCE(SUM(CASE WHEN tr.transactionDate BETWEEN DATE_ADD(DATE_FORMAT('{singapore_date}', '%Y-%m-01'), INTERVAL 21 DAY) 
-                                      AND LAST_DAY('{singapore_date}') THEN tr.totalAmount END), 0) AS Week_4
-                FROM transactions tr
-                WHERE MONTH(tr.transactionDate) = {singapore_month} AND YEAR(tr.transactionDate) = {singapore_year};
-            """,
-            "Year": f"""
-                SELECT 
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 1 THEN tr.totalAmount END), 0) AS Jan,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 2 THEN tr.totalAmount END), 0) AS Feb,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 3 THEN tr.totalAmount END), 0) AS Mar,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 4 THEN tr.totalAmount END), 0) AS Apr,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 5 THEN tr.totalAmount END), 0) AS May,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 6 THEN tr.totalAmount END), 0) AS Jun,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 7 THEN tr.totalAmount END), 0) AS Jul,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 8 THEN tr.totalAmount END), 0) AS Aug,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 9 THEN tr.totalAmount END), 0) AS Sep,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 10 THEN tr.totalAmount END), 0) AS Oct,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 11 THEN tr.totalAmount END), 0) AS Nov,
-                    COALESCE(SUM(CASE WHEN MONTH(tr.transactionDate) = 12 THEN tr.totalAmount END), 0) AS `Dec` 
-                FROM transactions tr
-                INNER JOIN users u ON u.id = tr.cashierId
-                WHERE YEAR(tr.transactionDate) = {singapore_year} 
-            """,
-            "All": f"""
-                WITH RECURSIVE MonthSeries AS (
-                    SELECT DATE_FORMAT(MIN(transactionDate), '%Y-%m-01') AS monthStart 
-                    FROM transactions 
-                    UNION ALL
-                    SELECT DATE_ADD(monthStart, INTERVAL 1 MONTH) 
-                    FROM MonthSeries
-                    WHERE monthStart < (SELECT DATE_FORMAT(MAX(transactionDate), '%Y-%m-01') FROM transactions)
-                )
-                SELECT 
-                    DATE_FORMAT(ms.monthStart, '%b %Y') AS YearMonth,
-                    COALESCE(SUM(tr.totalAmount), 0) AS TotalAmount
-                FROM MonthSeries ms
-                LEFT JOIN transactions tr 
-                    ON DATE_FORMAT(tr.transactionDate, '%Y-%m') = DATE_FORMAT(ms.monthStart, '%Y-%m')
-                GROUP BY ms.monthStart, YearMonth  
-                ORDER BY ms.monthStart;
-            """
-        }
         
-        sales_data = {}
-        for filter_type, query in queries.items():
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date() if from_date_str else now_sg.date()
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date() if to_date_str else now_sg.date()
+        except ValueError:
+            from_date = now_sg.date()
+            to_date = now_sg.date()
+
+        branch_filter = f"AND tr.branchId = {branch_id}" if branch_id != "0" else ""
+        if from_date == to_date:
+            query = f"""
+                SELECT 
+                    HOUR(tr.transactionDate) AS hour,
+                    COALESCE(SUM(tr.totalAmount), 0) AS totalAmount
+                FROM transactions tr
+                WHERE DATE(tr.transactionDate) = '{from_date}'
+                  AND HOUR(tr.transactionDate) BETWEEN 7 AND 17
+                  AND tr.isVoided = 0
+                  {branch_filter}
+                GROUP BY HOUR(tr.transactionDate)
+                ORDER BY hour
+            """
             result = await connection.execute_query_dict(query)
-            if filter_type == "All":
-                sales_data[filter_type] = [
-                    {"label": row["YearMonth"], "value": float(row["TotalAmount"]), "dataPointText": f"₱{float(row['TotalAmount']):,.2f}"} for row in result
-                ]
-            else:
-                sales_data[filter_type] = [
-                    {"label": k.replace('_', ' '), "value": float(v), "dataPointText": f"₱{float(v):,.2f}" } for row in result for k, v in row.items()
-                ]
+            
+            hours = range(7, 18) 
+            daily_data = {
+                hour: {
+                    'amount': 0,
+                    'display': f"{12 if hour % 12 == 0 else hour % 12}:00 {'AM' if hour < 12 else 'PM'}"
+                } 
+                for hour in hours
+            }
+            
+            for row in result:
+                hour_24 = row['hour']
+                if hour_24 in daily_data:
+                    daily_data[hour_24]['amount'] = float(row['totalAmount'])
+            
+            sales_data = [
+                {
+                    "label": daily_data[hour]['display'],
+                    "value": daily_data[hour]['amount'],
+                    "dataPointText": f"₱{daily_data[hour]['amount']:,.2f}"
+                } 
+                for hour in hours
+            ]
+        else:
+            query = f"""
+                SELECT 
+                    DATE(tr.transactionDate) AS date,
+                    COALESCE(SUM(tr.totalAmount), 0) AS totalAmount
+                FROM transactions tr
+                WHERE DATE(tr.transactionDate) BETWEEN '{from_date}' AND '{to_date}'
+                  AND tr.isVoided = 0
+                  {branch_filter}
+                GROUP BY DATE(tr.transactionDate)
+                ORDER BY date
+            """
+            result = await connection.execute_query_dict(query)
+            
+            sales_data = [
+                {
+                    "label": row['date'].strftime('%b %d, %Y'), 
+                    "value": float(row['totalAmount']),
+                    "dataPointText": f"₱{float(row['totalAmount']):,.2f}"
+                }
+                for row in result
+            ]
         
         await websocket.send_json(sales_data)
-        await asyncio.sleep(1)
-
+        await asyncio.sleep(100)
+        
 async def analysisReportHQ(websocket):
     while True:
         now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
@@ -695,6 +693,7 @@ async def analysisReportHQ(websocket):
                     ELSE 0.0 
                 END AS percentageChange
             FROM transactions
+            WHERE isVoided = 0
         """
 
         percentage = await connection.execute_query_dict(percentQuery)
@@ -717,6 +716,7 @@ async def analysisReportHQ(websocket):
             FROM transactions
             WHERE MONTH(transactionDate) = {singapore_month} 
             AND YEAR(transactionDate) = {singapore_year}
+            AND isVoided = 0
             GROUP BY transactionDate
             ORDER BY highestSalesAmount DESC
             LIMIT 1;
@@ -748,6 +748,7 @@ async def analysisReportHQ(websocket):
                         ) 
                 END AS highOrderPercentage
             FROM transactions
+            WHERE isVoided = 0
         """
         highSmallValue = await connection.execute_query_dict(highSmallQuery)
 
@@ -762,6 +763,7 @@ async def analysisReportHQ(websocket):
                 END AS peakPeriod,
                 COUNT(*) AS transactionCount
             FROM transactions
+            Where isVoided = 0
             GROUP BY peakPeriod
             ORDER BY transactionCount DESC
             LIMIT 1
@@ -781,3 +783,240 @@ async def analysisReportHQ(websocket):
 
         await websocket.send_json(response)
         await asyncio.sleep(1)
+
+async def dailyTransactionExacon(websocket):
+    while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        singapore_date = now_sg.date()
+
+        periods_to_include = get_time_periods()
+        totalAmountPerPeriod = {}
+
+        connection = Tortoise.get_connection('default')
+
+        for period in periods_to_include:
+            transactionQuery = f"""
+                SELECT tr.totalAmount
+                FROM transactions tr
+                INNER JOIN users u ON u.id = tr.cashierId
+                WHERE DATE(tr.transactionDate) = '{singapore_date}'
+                AND TIME(tr.transactionDate) BETWEEN '{period["start"]}' AND '{period["end"]}'
+                AND tr.isVoided = 0
+                AND tr.isExacon = 1 AND isPaid = 1
+                ORDER BY tr.transactionDate;
+            """
+            
+            transactions = await connection.execute_query_dict(transactionQuery)
+
+            total_amount = sum(float(tr["totalAmount"]) for tr in transactions)
+            totalAmountPerPeriod[period["id"]] = total_amount
+
+        graphDataDto = [
+            {"periodId": period["id"], "totalAmount": totalAmountPerPeriod.get(period["id"], 0.0)}
+            for period in periods_to_include
+        ]
+
+        dailyTransactsDto = f"""
+            SELECT tr.id, tr.totalAmount, tr.slipNo, tr.transactionDate, u.name as cashierName
+            FROM transactions tr
+            INNER JOIN users u ON u.id = tr.cashierId
+            WHERE DATE(tr.transactionDate) = '{singapore_date}'
+            AND tr.isVoided = 0
+            AND tr.isExacon = 1 AND isPaid = 1
+            ORDER BY tr.transactionDate;
+        """
+        
+        dailyTransactions = await connection.execute_query_dict(dailyTransactsDto)
+
+        transactionsDto = []
+
+        for tr in dailyTransactions:
+            itemsQuery = """
+                SELECT ti.id, i.name as itemName, i.id as itemId, ti.quantity 
+                FROM transactionitems ti
+                INNER JOIN items i ON i.id = ti.itemId
+                WHERE ti.transactionId = %s
+            """
+            items = await connection.execute_query_dict(itemsQuery, (tr['id'],))
+
+            transactionsDto.append({
+                "id": tr["id"],
+                "totalAmount": float(tr["totalAmount"]),
+                "slipNo": tr["slipNo"],
+                "transactionDate": tr["transactionDate"],
+                "cashierName": tr["cashierName"],
+                "items": items 
+            })
+
+        response = {
+            "graphData": graphDataDto,
+            "transactions": transactionsDto
+        }
+
+        await websocket.send_json(response)
+
+        await asyncio.sleep(1)
+
+async def totalCentralSales(websocket):
+    while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        singapore_year = now_sg.year
+        singapore_month = now_sg.month
+
+        connection = Tortoise.get_connection('default')
+
+        totalSalesYearQuery = f"""
+            SELECT SUM(totalAmount) AS totalSales
+            FROM transactions
+            WHERE YEAR(transactionDate) = {singapore_year}
+            AND isVoided = 0 AND isExacon = 1 and isPaid = 1
+        """
+        totalSalesPerYear = await connection.execute_query_dict(totalSalesYearQuery)
+
+        totalSalesMonthQuery = f"""
+            SELECT SUM(totalAmount) AS totalSales
+            FROM transactions
+            WHERE YEAR(transactionDate) = {singapore_year}
+            AND MONTH(transactionDate) = {singapore_month}
+            AND isVoided = 0 AND isExacon = 1 and isPaid = 1
+        """
+        totalSalesPerMonth = await connection.execute_query_dict(totalSalesMonthQuery)
+
+        totalSalesYear = totalSalesPerYear[0]["totalSales"] if totalSalesPerYear and totalSalesPerYear[0]["totalSales"] else 0.0
+        totalSalesMonth = totalSalesPerMonth[0]["totalSales"] if totalSalesPerMonth and totalSalesPerMonth[0]["totalSales"] else 0.0
+
+        response = {
+            "totalSalesPerYear": float(totalSalesYear),
+            "totalSalesPerMonth": float(totalSalesMonth)
+        }
+
+        await websocket.send_json(response)
+
+        await asyncio.sleep(1)
+
+async def analyticsSalesDataHQ(websocket, from_date_str, to_date_str, branch_id):
+    while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        connection = Tortoise.get_connection('default')
+        
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date() if from_date_str else now_sg.date()
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date() if to_date_str else now_sg.date()
+        except ValueError:
+            from_date = now_sg.date()
+            to_date = now_sg.date()
+
+        branch_filter = f"AND tr.branchId = {branch_id}" if branch_id != "0" else ""
+        if from_date == to_date:
+            query = f"""
+                SELECT 
+                    HOUR(tr.transactionDate) AS hour,
+                    COALESCE(SUM(tr.totalAmount), 0) AS totalAmount
+                FROM transactions tr
+                WHERE DATE(tr.transactionDate) = '{from_date}'
+                  AND HOUR(tr.transactionDate) BETWEEN 7 AND 17
+                  AND tr.isVoided = 0 AND tr.isPaid = 1
+                  {branch_filter}
+                GROUP BY HOUR(tr.transactionDate)
+                ORDER BY hour
+            """
+            result = await connection.execute_query_dict(query)
+            
+            hours = range(7, 18) 
+            daily_data = {
+                hour: {
+                    'amount': 0,
+                    'display': f"{12 if hour % 12 == 0 else hour % 12}:00 {'AM' if hour < 12 else 'PM'}"
+                } 
+                for hour in hours
+            }
+            
+            for row in result:
+                hour_24 = row['hour']
+                if hour_24 in daily_data:
+                    daily_data[hour_24]['amount'] = float(row['totalAmount'])
+            
+            sales_data = [
+                {
+                    "label": daily_data[hour]['display'],
+                    "value": daily_data[hour]['amount'],
+                    "dataPointText": f"₱{daily_data[hour]['amount']:,.2f}"
+                } 
+                for hour in hours
+            ]
+        else:
+            query = f"""
+                SELECT 
+                    DATE(tr.transactionDate) AS date,
+                    COALESCE(SUM(tr.totalAmount), 0) AS totalAmount
+                FROM transactions tr
+                WHERE DATE(tr.transactionDate) BETWEEN '{from_date}' AND '{to_date}'
+                  AND tr.isVoided = 0 AND tr.isPaid = 1
+                  {branch_filter}
+                GROUP BY DATE(tr.transactionDate)
+                ORDER BY date
+            """
+            result = await connection.execute_query_dict(query)
+            
+            sales_data = [
+                {
+                    "label": row['date'].strftime('%b %d, %Y'), 
+                    "value": float(row['totalAmount']),
+                    "dataPointText": f"₱{float(row['totalAmount']):,.2f}"
+                }
+                for row in result
+            ]
+        
+        await websocket.send_json(sales_data)
+        await asyncio.sleep(100)
+
+async def analyticsGrossSalesDataHQ(websocket, from_date_str, to_date_str, branch_id):
+    while True:
+        now_sg = datetime.now(timezone.utc) + timedelta(hours=8)
+        connection = Tortoise.get_connection('default')
+
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date() if from_date_str else now_sg.date()
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date() if to_date_str else now_sg.date()
+        except ValueError:
+            from_date = now_sg.date()
+            to_date = now_sg.date()
+
+        branch_filter = f"AND tr.branchId = {branch_id}" if branch_id != "0" else ""
+
+        query = f"""
+                SELECT 
+                    COALESCE(SUM(tr.totalAmount), 0) AS gross_sales,
+                    COALESCE(SUM(tr.discount), 0) AS total_discount,
+                    COALESCE(SUM(tr.totalAmount), 0) - COALESCE(SUM(tr.discount), 0) AS net_sales,
+                    COALESCE(SUM(costs.item_cost), 0) AS item_cost,
+                    (COALESCE(SUM(tr.totalAmount), 0) - COALESCE(SUM(tr.discount), 0)) - COALESCE(SUM(costs.item_cost), 0) AS gross_profit
+                FROM transactions tr
+                LEFT JOIN (
+                    SELECT 
+                        ti.transactionId,
+                        SUM(ti.quantity * i.cost) AS item_cost
+                    FROM transactionitems ti
+                    JOIN items i ON ti.itemId = i.id
+                    GROUP BY ti.transactionId
+                ) AS costs ON tr.id = costs.transactionId
+                WHERE DATE(tr.transactionDate) BETWEEN '{from_date}' AND '{to_date}'
+                AND tr.isVoided = 0
+                AND tr.isPaid = 1
+              {branch_filter}
+        """
+
+        result = await connection.execute_query_dict(query)
+
+        summary = result[0] if result else {}
+
+        response = {
+            "grossSales": float(summary.get("gross_sales", 0)),
+            "totalDiscount": float(summary.get("total_discount", 0)),
+            "netSales": float(summary.get("net_sales", 0)),
+            "itemCost": float(summary.get("item_cost", 0)),
+            "grossProfit": float(summary.get("gross_profit", 0)),
+        }
+
+        await websocket.send_json(response)
+        await asyncio.sleep(100)
